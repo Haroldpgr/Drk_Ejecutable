@@ -1,0 +1,67 @@
+/* Ajustes para reducir el tamaño de los elementos */
+
+/* Reducción del tamaño del carrusel */
+.home-carousel-image-container {
+  height: 300px; /* Reducido de 350px a 300px */
+}
+
+/* Reducción del tamaño de los recuadros de información */
+.home-info-card {
+  min-height: 150px; /* Reducido para que sean más compactos */
+  padding: 1rem; /* Reducido el padding */
+}
+
+.home-info-card-image {
+  width: 80px; /* Reducido de 100px */
+  height: 80px; /* Reducido de 100px */
+}
+
+.home-info-card-title {
+  font-size: 0.8rem; /* Reducido el tamaño de la fuente */
+}
+
+.home-info-card-text {
+  font-size: 0.8rem; /* Reducido el tamaño de la fuente */
+}
+
+/* Ajustes para el botón de ajustes */
+.home-instance-settings-button {
+  padding: 0.75rem 1rem; /* Reducido el padding */
+  top: 1rem; /* Ajustado el margen superior */
+  right: 1rem; /* Ajustado el margen derecho */
+}
+
+/* Ajustes para el contenedor de información */
+.home-instance-info-cards {
+  gap: 1rem; /* Reducido el espacio entre tarjetas */
+}
+
+/* Ajustes para el contenedor principal */
+.home-instance-view {
+  gap: 1rem; /* Reducido el espacio entre secciones */
+}
+
+/* Ajustes para los botones de acción */
+.home-instance-play-button,
+.home-instance-download-button,
+.home-instance-verify-button {
+  padding: 0.75rem 1.5rem; /* Reducido el padding */
+  font-size: 1rem; /* Reducido el tamaño de la fuente */
+}
+
+/* Ajustes para el carrusel de imágenes */
+.home-carousel-button {
+  width: 40px; /* Reducido de 56px */
+  height: 40px; /* Reducido de 56px */
+}
+
+/* Ajustes para los indicadores del carrusel */
+.home-carousel-indicators {
+  bottom: 1rem; /* Ajustado el margen inferior */
+  padding: 0.25rem 0.5rem; /* Reducido el padding */
+}
+
+.home-carousel-indicator {
+  width: 10px; /* Reducido de 12px */
+  height: 10px; /* Reducido de 12px */
+}

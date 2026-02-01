@@ -1,0 +1,522 @@
+.login-container {
+  min-height: 100vh;
+  width: 100%;
+  background: linear-gradient(135deg, #0a0a0a 0%, #1a0a2e 50%, #16213e 100%);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+/* Animated Background */
+.login-background {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+}
+
+/* Stars Animation */
+.stars,
+.stars2,
+.stars3 {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.stars {
+  background-image: 
+    radial-gradient(2px 2px at 20% 30%, white, transparent),
+    radial-gradient(2px 2px at 60% 70%, white, transparent),
+    radial-gradient(1px 1px at 50% 50%, white, transparent),
+    radial-gradient(1px 1px at 80% 10%, white, transparent),
+    radial-gradient(2px 2px at 90% 40%, white, transparent),
+    radial-gradient(1px 1px at 33% 60%, white, transparent),
+    radial-gradient(1px 1px at 55% 20%, white, transparent);
+  background-repeat: repeat;
+  background-size: 200% 200%;
+  animation: sparkle 20s linear infinite;
+  opacity: 0.8;
+}
+
+.stars2 {
+  background-image: 
+    radial-gradient(1px 1px at 25% 25%, white, transparent),
+    radial-gradient(1px 1px at 75% 75%, white, transparent),
+    radial-gradient(1px 1px at 40% 60%, white, transparent);
+  background-repeat: repeat;
+  background-size: 300% 300%;
+  animation: sparkle 15s linear infinite;
+  opacity: 0.6;
+}
+
+.stars3 {
+  background-image: 
+    radial-gradient(1px 1px at 15% 45%, white, transparent),
+    radial-gradient(1px 1px at 85% 25%, white, transparent);
+  background-repeat: repeat;
+  background-size: 400% 400%;
+  animation: sparkle 25s linear infinite;
+  opacity: 0.4;
+}
+
+@keyframes sparkle {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-2000px);
+  }
+}
+
+/* Nebula Effects */
+.nebula {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.4;
+  animation: nebulaFloat 20s ease-in-out infinite;
+}
+
+.nebula-1 {
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, #6366f1 0%, transparent 70%);
+  top: -200px;
+  left: -200px;
+  animation-delay: 0s;
+}
+
+.nebula-2 {
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, #3b82f6 0%, transparent 70%);
+  bottom: -150px;
+  right: -150px;
+  animation-delay: 10s;
+}
+
+@keyframes nebulaFloat {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(50px, 50px) scale(1.1);
+  }
+}
+
+/* Content */
+.login-content {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+}
+
+/* Header */
+.login-header {
+  text-align: center;
+  animation: fadeInDown 1s ease-out;
+}
+
+.login-logo-container {
+  position: relative;
+  display: inline-block;
+  margin-bottom: 1.5rem;
+}
+
+.login-logo-glow {
+  position: absolute;
+  inset: -15px;
+  background: linear-gradient(135deg, #6366f1, #3b82f6, #8b5cf6);
+  border-radius: 50%;
+  filter: blur(30px);
+  opacity: 0.6;
+  animation: pulseGlow 3s ease-in-out infinite;
+}
+
+.login-logo {
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, #1a0a2e, #16213e);
+  border: 3px solid rgba(99, 102, 241, 0.5);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.5);
+}
+
+.login-logo-text {
+  font-size: 2rem;
+  font-weight: 900;
+  background: linear-gradient(135deg, #6366f1, #3b82f6, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 0.1em;
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.1);
+  }
+}
+
+.login-title {
+  font-size: 2rem;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+}
+
+.login-title-highlight {
+  color: #818cf8;
+  text-shadow: 0 0 30px rgba(129, 140, 248, 0.8);
+}
+
+/* Quick Login */
+.login-quick-login {
+  width: 100%;
+  margin-bottom: 2rem;
+  animation: fadeInUp 1s ease-out 0.2s both;
+}
+
+.login-quick-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.login-quick-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.login-quick-account {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.875rem 1rem;
+  background: rgba(20, 20, 30, 0.5);
+  border: 2px solid rgba(99, 102, 241, 0.2);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  width: 100%;
+  text-align: left;
+}
+
+.login-quick-account:hover:not(:disabled) {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(20, 20, 30, 0.7);
+  transform: translateX(4px);
+}
+
+.login-quick-account:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.login-quick-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.login-quick-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.login-quick-avatar svg {
+  color: white;
+}
+
+.login-quick-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.login-quick-username {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: white;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.login-quick-type {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Account Cards */
+.login-accounts {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: fadeInUp 1s ease-out 0.3s both;
+}
+
+.login-account-card {
+  background: rgba(20, 20, 30, 0.6);
+  backdrop-filter: blur(20px);
+  border: 2px solid rgba(99, 102, 241, 0.3);
+  border-radius: 16px;
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.login-account-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(59, 130, 246, 0.1));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.login-account-card:hover::before {
+  opacity: 1;
+}
+
+.login-account-card:hover {
+  border-color: rgba(129, 140, 248, 0.6);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 40px rgba(99, 102, 241, 0.3);
+}
+
+.login-account-card-premium {
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.login-account-card-offline {
+  border-color: rgba(251, 146, 60, 0.4);
+}
+
+.login-account-card-offline::before {
+  background: linear-gradient(135deg, rgba(251, 146, 60, 0.1), rgba(234, 179, 8, 0.1));
+}
+
+.login-account-card-offline:hover {
+  border-color: rgba(251, 146, 60, 0.6);
+  box-shadow: 0 10px 40px rgba(251, 146, 60, 0.3);
+}
+
+.login-account-icon {
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.login-microsoft-icon {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.login-microsoft-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.login-offline-icon {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(251, 146, 60, 0.2), rgba(234, 179, 8, 0.2));
+  border-radius: 12px;
+  padding: 12px;
+  color: #fb923c;
+}
+
+.login-offline-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.login-account-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.login-account-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+}
+
+.login-account-description {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0;
+}
+
+.login-account-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.login-account-button-premium {
+  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  color: white;
+}
+
+.login-account-button-premium:hover {
+  background: linear-gradient(135deg, #4f46e5, #2563eb);
+  transform: scale(1.05);
+}
+
+.login-account-button-offline {
+  background: linear-gradient(135deg, #fb923c, #f59e0b);
+  color: white;
+}
+
+.login-account-button-offline:hover {
+  background: linear-gradient(135deg, #f97316, #eab308);
+  transform: scale(1.05);
+}
+
+.login-account-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.login-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Footer */
+.login-footer {
+  text-align: center;
+  animation: fadeIn 1s ease-out 0.6s both;
+}
+
+.login-footer-text {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+/* Animations */
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .login-title {
+    font-size: 2rem;
+  }
+  
+  .login-account-card {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .login-account-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+

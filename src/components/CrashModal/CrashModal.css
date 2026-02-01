@@ -1,0 +1,166 @@
+.crash-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+  backdrop-filter: blur(5px);
+  animation: fadeIn 0.3s ease;
+}
+
+.crash-modal {
+  background-color: #1a1b26;
+  border: 1px solid #f87171;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 800px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+  animation: slideIn 0.3s ease;
+  overflow: hidden;
+}
+
+.crash-modal-header {
+  padding: 1.5rem;
+  border-bottom: 1px solid #2e303e;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  background-color: rgba(248, 113, 113, 0.1);
+}
+
+.crash-modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.crash-modal-icon {
+  color: #f87171;
+  background-color: rgba(248, 113, 113, 0.2);
+  padding: 0.75rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.crash-modal-title h2 {
+  margin: 0;
+  color: #f87171;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.crash-modal-title p {
+  margin: 0.25rem 0 0;
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+.crash-modal-close {
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.crash-modal-close:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.crash-modal-content {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.crash-modal-logs {
+  background-color: #0f111a;
+  border: 1px solid #2e303e;
+  border-radius: 8px;
+  padding: 1rem;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.85rem;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 400px;
+  overflow-y: auto;
+  margin-top: 1rem;
+}
+
+.crash-modal-logs::-webkit-scrollbar {
+  width: 8px;
+}
+
+.crash-modal-logs::-webkit-scrollbar-track {
+  background: #0f111a;
+}
+
+.crash-modal-logs::-webkit-scrollbar-thumb {
+  background: #2e303e;
+  border-radius: 4px;
+}
+
+.crash-modal-actions {
+  padding: 1.5rem;
+  border-top: 1px solid #2e303e;
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  background-color: #161720;
+}
+
+.crash-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: none;
+}
+
+.crash-btn-secondary {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #9ca3af;
+}
+
+.crash-btn-secondary:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.crash-btn-primary {
+  background-color: #f87171;
+  color: #fff;
+}
+
+.crash-btn-primary:hover {
+  background-color: #ef4444;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideIn {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
