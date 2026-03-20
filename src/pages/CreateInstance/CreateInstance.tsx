@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { X, Save, Server, Cpu, Image as ImageIcon, Plus, Trash2, Link as LinkIcon, Eye, ChevronLeft, ChevronRight, Upload, ArrowLeft, ArrowRight } from "lucide-react";
+import { X, Save, Server, Cpu, Image as ImageIcon, Plus, Trash2, Link as LinkIcon, Eye, ChevronLeft, ChevronRight, Upload, ArrowLeft, ArrowRight, Download } from "lucide-react";
 import "./CreateInstance.css";
+import { supabase } from "../../supabase";
 
 
 interface CreateInstanceProps {
   onClose: () => void;
   onSave: (instanceData: InstanceData) => void;
+  onCreated: () => void;
+  showToast: (message: string, type: "success" | "error" | "info" | "warning") => void;
 }
 
 export interface InstanceData {
@@ -102,17 +105,20 @@ function ImageUploadInput({ value, onChange, placeholder = "URL de imagen..." }:
   );
 }
 
-export default function CreateInstance({ onClose, onSave }: CreateInstanceProps) {
+export default function CreateInstance({ onClose, onCreated, showToast }: CreateInstanceProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [newImageUrl, setNewImageUrl] = useState("");
-  const [ram, setRam] = useState(4096);
+  const [ram, setRam] = useState(() => {
+    const globalRam = localStorage.getItem("drk_settings_global_ram");
+    return globalRam ? Number(globalRam) : 4096;
+  });
   const [systemRam, setSystemRam] = useState(8192);
   const [serverIp, setServerIp] = useState("");
   const [serverName, setServerName] = useState("");
   const [modpackUrl, setModpackUrl] = useState("");
-  const [version, setVersion] = useState("1.20.1");
+  const [version, setVersion] = useState("1.21.1");
   const [versions, setVersions] = useState<string[]>([]);
   const [selectedLauncher, setSelectedLauncher] = useState<string>("");
   const [modloader, setModloader] = useState("vanilla");
@@ -121,6 +127,98 @@ export default function CreateInstance({ onClose, onSave }: CreateInstanceProps)
   const [resolutionHeight, setResolutionHeight] = useState(480);
   const [javaInfo, setJavaInfo] = useState<{recommended: number; installed: boolean; path: string} | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  const handleCreate = async () => {
+    if (!name.trim()) {
+      showToast("El nombre de la instancia es obligatorio", "warning");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const { error } = await supabase
+        .from('global_instances')
+        .insert([
+          {
+            name: name.trim(), 
+            description: description.trim() || null, 
+            mc_version: version, 
+            loader_type: modloader,
+            loader_version: loaderVersion || null,
+            icon_url: images.length > 0 ? images[0] : null,
+            created_by: user?.id,
+            ram: ram,
+            server_ip: serverIp.trim() || null,
+            server_name: serverName.trim() || null,
+            modpack_url: modpackUrl.trim() || null,
+            images: images,
+            resolution_width: resolutionWidth,
+            resolution_height: resolutionHeight,
+            news_left: (newsLeftImage || newsLeftTitle || newsLeftContent) ? {
+              image: newsLeftImage.trim() || null,
+              title: newsLeftTitle.trim() || null,
+              content: newsLeftContent.trim() || null,
+            } : null,
+            news_center: (newsCenterImage || newsCenterTitle || newsCenterContent) ? {
+              image: newsCenterImage.trim() || null,
+              title: newsCenterTitle.trim() || null,
+              content: newsCenterContent.trim() || null,
+            } : null,
+            news_right: (newsRightImage || newsRightTitle || newsRightContent) ? {
+              image: newsRightImage.trim() || null,
+              title: newsRightTitle.trim() || null,
+              content: newsRightContent.trim() || null,
+            } : null,
+            stats_card: (statsCardImage || playersOnline !== undefined || latency !== undefined || serverStatus) ? {
+              image: statsCardImage.trim() || null,
+              players_online: playersOnline,
+              latency: latency,
+              status: serverStatus.trim() || null,
+            } : null,
+            info_card: (infoCardImage || modsInstalled !== undefined || lastUpdate) ? {
+              image: infoCardImage.trim() || null,
+              mods_installed: modsInstalled,
+              last_update: lastUpdate.trim() || null,
+            } : null
+          }
+        ]);
+
+      if (error) {
+        // Si el error es por columnas faltantes, intentamos un insert simplificado como fallback
+        if (error.code === '42703') { // undefined_column
+          console.warn("Columnas extendidas no encontradas en Supabase. Intentando insert básico.");
+          const { error: basicError } = await supabase
+            .from('global_instances')
+            .insert([
+              {
+                name: name.trim(), 
+                description: description.trim() || null, 
+                mc_version: version, 
+                loader_type: modloader,
+                icon_url: images.length > 0 ? images[0] : null,
+                created_by: user?.id
+              }
+            ]);
+          if (basicError) throw basicError;
+          showToast("Instancia creada (Básico). Faltan columnas en la DB para datos extendidos.", "info");
+        } else {
+          throw error;
+        }
+      } else {
+        showToast("¡Instancia global creada con éxito!", "success");
+      }
+
+      onCreated();
+      onClose();
+    } catch (error: any) {
+      console.error(error);
+      showToast("Error al crear la instancia: " + error.message, "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
   const [showPreview, setShowPreview] = useState(true);
   const [previewImageIndex, setPreviewImageIndex] = useState(0);
   
@@ -138,11 +236,6 @@ export default function CreateInstance({ onClose, onSave }: CreateInstanceProps)
   const [newsRightContent, setNewsRightContent] = useState("");
   
   // Recuadros de información (Legacy / Bottom Sections)
-  const [eventCardImage] = useState("");
-  const [eventName] = useState("");
-  const [eventDate] = useState("");
-  const [eventRewards] = useState("");
-  
   const [statsCardImage, setStatsCardImage] = useState("");
   const [playersOnline, setPlayersOnline] = useState<number | undefined>(undefined);
   const [latency, setLatency] = useState<number | undefined>(undefined);
@@ -282,78 +375,11 @@ export default function CreateInstance({ onClose, onSave }: CreateInstanceProps)
       await invoke("download_java", { major: javaInfo.recommended });
       const info = await invoke<{ recommended: number; installed: boolean; path: string }>("get_java_info", { mcVersion: version });
       setJavaInfo(info);
+      showToast("Java descargado con éxito", "success");
     } catch (error) {
       console.error("Error downloading Java:", error);
-      alert("Error al descargar Java");
+      showToast("Error al descargar Java", "error");
     }
-  }
-
-  function handleSave() {
-    if (!name.trim()) {
-      alert("Por favor ingresa un nombre para la instancia");
-      return;
-    }
-
-    if (!selectedLauncher) {
-      alert("Por favor selecciona un launcher");
-      return;
-    }
-
-    setIsLoading(true);
-
-    const instanceData: InstanceData = {
-      name: name.trim(),
-      description: description.trim() || undefined,
-      images: images.length > 0 ? images : undefined,
-      ram,
-      serverIp: serverIp.trim() || undefined,
-      serverName: serverName.trim() || undefined,
-      modpackUrl: modpackUrl.trim() || undefined,
-      mods: [],
-      launcher: selectedLauncher,
-      version,
-      modloader,
-      resolutionWidth,
-      resolutionHeight,
-      newsLeft: (newsLeftImage || newsLeftTitle || newsLeftContent) ? {
-        image: newsLeftImage.trim() || undefined,
-        title: newsLeftTitle.trim() || undefined,
-        content: newsLeftContent.trim() || undefined,
-      } : undefined,
-      newsCenter: (newsCenterImage || newsCenterTitle || newsCenterContent) ? {
-        image: newsCenterImage.trim() || undefined,
-        title: newsCenterTitle.trim() || undefined,
-        content: newsCenterContent.trim() || undefined,
-      } : undefined,
-      newsRight: (newsRightImage || newsRightTitle || newsRightContent) ? {
-        image: newsRightImage.trim() || undefined,
-        title: newsRightTitle.trim() || undefined,
-        content: newsRightContent.trim() || undefined,
-      } : undefined,
-      eventCard: (eventCardImage || eventName || eventDate || eventRewards) ? {
-        image: eventCardImage.trim() || undefined,
-        eventName: eventName.trim() || undefined,
-        date: eventDate.trim() || undefined,
-        rewards: eventRewards.trim() || undefined,
-      } : undefined,
-      statsCard: (statsCardImage || playersOnline !== undefined || latency !== undefined || serverStatus) ? {
-        image: statsCardImage.trim() || undefined,
-        playersOnline: playersOnline,
-        latency: latency,
-        status: serverStatus.trim() || undefined,
-      } : undefined,
-      infoCard: (infoCardImage || modsInstalled !== undefined || lastUpdate) ? {
-        image: infoCardImage.trim() || undefined,
-        modsInstalled: modsInstalled,
-        lastUpdate: lastUpdate.trim() || undefined,
-      } : undefined,
-    };
-
-    setTimeout(() => {
-      onSave(instanceData);
-      setIsLoading(false);
-      onClose();
-    }, 1000);
   }
 
   const previewImages = images.length > 0 ? images : [];
@@ -473,6 +499,15 @@ export default function CreateInstance({ onClose, onSave }: CreateInstanceProps)
                     Asignación de RAM
                   </label>
                   <div className="create-instance-ram-control">
+                    <div className="create-instance-ram-header">
+                      <div className="create-instance-ram-display">
+                        <span className="ram-number">{(ram / 1024).toFixed(1)}</span>
+                        <span className="ram-unit">GB</span>
+                      </div>
+                      <div className="create-instance-ram-info">
+                        Recomendado: {Math.floor(systemRam / 2048)}GB de {Math.floor(systemRam / 1024)}GB
+                      </div>
+                    </div>
                     <input
                       type="range"
                       min="1024"
@@ -482,10 +517,9 @@ export default function CreateInstance({ onClose, onSave }: CreateInstanceProps)
                       onChange={(e) => setRam(parseInt(e.target.value))}
                       className="create-instance-slider"
                     />
-                    <span className="create-instance-ram-value">{ram / 1024} GB</span>
                   </div>
                   <div className="create-instance-ram-presets">
-                    {[2048, 4096, 6144, 8192].map((preset) => (
+                    {[2048, 4096, 6144, 8192, 12288, 16384].filter(p => p <= systemRam || systemRam === 0).map((preset) => (
                       <button
                         key={preset}
                         onClick={() => setRam(preset)}
@@ -602,14 +636,31 @@ export default function CreateInstance({ onClose, onSave }: CreateInstanceProps)
                   <label className="create-instance-label">Java recomendado</label>
                   <div className="create-instance-hint">
                     {javaInfo ? (
-                      <>
-                        Java {javaInfo.recommended} {javaInfo.installed ? `(instalado)` : `(no instalado)`}
+                      <div className={`java-status ${javaInfo.installed ? 'installed' : 'not-installed'}`}>
+                        <div className="java-status-icon">
+                          {javaInfo.installed ? '✓' : '⚠'}
+                        </div>
+                        <div className="java-status-info">
+                          <span className="java-version-text">Java {javaInfo.recommended}</span>
+                          <span className="java-status-text">
+                            {javaInfo.installed ? 'Instalado y listo' : 'No se encontró una versión compatible'}
+                          </span>
+                        </div>
                         {!javaInfo.installed && (
-                          <button onClick={handleDownloadJava} className="create-instance-button create-instance-button-secondary" style={{ marginLeft: 8 }}>Descargar Java</button>
+                          <button 
+                            onClick={handleDownloadJava} 
+                            className="create-instance-download-java-btn"
+                          >
+                            <Download size={14} />
+                            Instalar
+                          </button>
                         )}
-                      </>
+                      </div>
                     ) : (
-                      <>Detectando...</>
+                      <div className="java-status checking">
+                        <div className="home-spinner-mini"></div>
+                        <span>Verificando compatibilidad de Java...</span>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -748,19 +799,16 @@ export default function CreateInstance({ onClose, onSave }: CreateInstanceProps)
             {/* Footer */}
             <div className="create-instance-footer">
               <button
-                onClick={handleSave}
-                disabled={isLoading || !name.trim() || !selectedLauncher}
                 className="create-instance-button create-instance-button-primary"
+                onClick={handleCreate}
+                disabled={isLoading}
               >
                 {isLoading ? (
-                  <>
-                    <div className="create-instance-spinner"></div>
-                    <span>Creando...</span>
-                  </>
+                  <div className="create-instance-spinner"></div>
                 ) : (
                   <>
                     <Save size={20} />
-                    <span>Crear Instancia</span>
+                    <span>Crear Instancia Global</span>
                   </>
                 )}
               </button>

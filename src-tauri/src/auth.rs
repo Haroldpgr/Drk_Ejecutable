@@ -16,6 +16,7 @@ pub struct MinecraftProfile {
     pub name: String,
     pub access_token: String,
     pub has_entitlement: bool,
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Default)]
@@ -231,6 +232,7 @@ pub async fn start_microsoft_login(state: State<'_, AppState>) -> Result<String,
             name: profile_res.name.clone(),
             access_token: mc_token,
             has_entitlement: entitlements_ok,
+            avatar_url: None,
         });
     }
 
@@ -248,13 +250,19 @@ pub fn get_auth_profile(state: State<'_, AppState>) -> Result<Option<MinecraftPr
 }
 
 #[tauri::command]
-pub async fn start_offline_login(username: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn start_offline_login(username: String, avatar: Option<String>, state: State<'_, AppState>) -> Result<String, String> {
     let mut auth_state = state.auth.lock().map_err(|_| "Failed to lock auth state".to_string())?;
+    
+    // Generar un UUID constante basado en el nombre de usuario (Offline UUID)
+    // Esto es vital para que las skins y estadísticas se mantengan consistentes
+    let uuid = uuid::Uuid::new_v3(&uuid::Uuid::NAMESPACE_DNS, username.as_bytes()).to_string();
+
     auth_state.profile = Some(MinecraftProfile {
-        id: uuid::Uuid::new_v4().to_string(),
+        id: uuid,
         name: username,
         access_token: "offline".to_string(),
         has_entitlement: false,
+        avatar_url: avatar,
     });
     Ok("Logged in offline".to_string())
 }

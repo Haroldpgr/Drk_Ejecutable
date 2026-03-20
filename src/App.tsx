@@ -9,6 +9,13 @@ import CreateInstance, { InstanceData } from "./pages/CreateInstance/CreateInsta
 import AdminLogin from "./components/AdminLogin/AdminLogin";
 import ConfirmModal from "./components/ConfirmModal/ConfirmModal";
 import CrashModal from "./components/CrashModal/CrashModal";
+import Toast, { ToastType } from "./components/Toast/Toast";
+import "./components/Toast/Toast.css";
+import InstanceSettings from "./components/InstanceSettings/InstanceSettings";
+import Profile from "./pages/Profile/Profile";
+import Settings from "./pages/Settings/Settings";
+import AdminDashboard from "./pages/AdminDashboard/AdminDashboard";
+import { supabase } from "./supabase";
 import "./App.css";
 
 interface Instance {
@@ -73,27 +80,13 @@ interface Instance {
   modloader?: string;
   resolutionWidth?: number;
   resolutionHeight?: number;
+  is_global?: boolean;
 }
 
 interface SavedAccount {
   username: string;
   type: "microsoft" | "offline";
   avatar?: string;
-}
-
-interface InstanceSettingsDraft {
-  name: string;
-  description?: string;
-  version: string;
-  ram?: number;
-  serverIp?: string;
-  serverName?: string;
-  modpackUrl?: string;
-  modloader?: string;
-  launcher?: string;
-  image?: string;
-  resolutionWidth?: number;
-  resolutionHeight?: number;
 }
 
 function App() {
@@ -108,6 +101,7 @@ function App() {
   const [playFlowInstanceId, setPlayFlowInstanceId] = useState<string | null>(null);
   const [isCheckingReady, setIsCheckingReady] = useState(false);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [currentView, setCurrentView] = useState<"home" | "profile" | "settings" | "admin-dashboard">("home");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showOfflineLogin, setShowOfflineLogin] = useState(false);
   const [showCreateInstance, setShowCreateInstance] = useState(false);
@@ -115,11 +109,37 @@ function App() {
   const [username, setUsername] = useState("");
   const [userAvatar, setUserAvatar] = useState("");
   const [settingsInstance, setSettingsInstance] = useState<Instance | null>(null);
-  const [settingsDraft, setSettingsDraft] = useState<InstanceSettingsDraft | null>(null);
-  const [advancedInstance, setAdvancedInstance] = useState<Instance | null>(null);
-  const [advancedDraft, setAdvancedDraft] = useState<InstanceSettingsDraft | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
+
+  // Sistema de Toasts
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
+
+  const showToast = (message: string, type: ToastType) => {
+    setToast({ message, type });
+  };
+
+  // Efecto para verificar si el usuario logueado es admin en Supabase
+  useEffect(() => {
+    async function checkAdminStatus() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single();
+        
+        if (profile?.is_admin) {
+          setIsAdmin(true);
+          localStorage.setItem("drk_launcher_admin", "true");
+        }
+      }
+    }
+    if (isLoggedIn) {
+      checkAdminStatus();
+    }
+  }, [isLoggedIn]);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -153,17 +173,22 @@ function App() {
     const adminFlag = localStorage.getItem("drk_launcher_admin") === "true";
     
     if (savedLogin === "true") {
+      if (authType === "microsoft") {
+        localStorage.setItem("drk_launcher_logged_in", "false");
+        return;
+      }
       setIsLoggedIn(true);
       setIsOfflineMode(authType === "offline");
       setIsAdmin(adminFlag);
       if (savedUsername) {
         setUsername(savedUsername);
+        const avatar = savedAvatar || "";
+        setUserAvatar(avatar);
         // Restore offline session in Rust
         if (authType === "offline") {
-          invoke("start_offline_login", { username: savedUsername }).catch(console.error);
+          invoke("start_offline_login", { username: savedUsername, avatar }).catch(console.error);
         }
       }
-      if (savedAvatar) setUserAvatar(savedAvatar);
       loadInstances();
     }
   }, []);
@@ -179,98 +204,71 @@ function App() {
     return () => document.removeEventListener("contextmenu", handleContextMenu);
   }, [isAdmin]);
 
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || !event.shiftKey || event.key.toLowerCase() !== "a") {
-        return;
-      }
-      if (localStorage.getItem("drk_launcher_admin") !== "true") {
-        return;
-      }
-      const targetInstance = settingsInstance || selectedInstance;
-      if (!targetInstance) {
-        return;
-      }
-      setAdvancedInstance(targetInstance);
-      setAdvancedDraft({
-        name: targetInstance.name,
-        description: targetInstance.description,
-        version: targetInstance.version,
-        ram: targetInstance.ram,
-        serverIp: targetInstance.serverIp,
-        serverName: targetInstance.serverName,
-        modpackUrl: targetInstance.modpackUrl,
-        modloader: targetInstance.modloader,
-        launcher: targetInstance.launcher,
-        image: targetInstance.image,
-      });
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [selectedInstance, settingsInstance]);
-
   async function loadInstances() {
     try {
-      const instancesData = await invoke<any[]>("get_instances");
-      // Mapear campos de snake_case a camelCase
-      const instancesWithImages = instancesData.map((instance: any) => ({
-        id: instance.id,
-        name: instance.name,
-        version: instance.version,
-        lastPlayed: instance.last_played || instance.lastPlayed || new Date().toISOString(),
-        icon: instance.icon || "default",
-        path: instance.path || "",
-        image: instance.image || (instance.images && instance.images.length > 0 ? instance.images[0] : undefined) || `https://api.dicebear.com/7.x/shapes/svg?seed=${instance.name}`,
-        images: instance.images,
-        description: instance.description,
-        ram: instance.ram,
-        serverIp: instance.server_ip || instance.serverIp,
-        serverName: instance.server_name || instance.serverName,
-        modpackUrl: instance.modpack_url || instance.modpackUrl,
-        mods: instance.mods,
-        launcher: instance.launcher,
-        newsLeft: instance.news_left || instance.newsLeft,
-        newsCenter: instance.news_center || instance.newsCenter,
-        newsRight: instance.news_right || instance.newsRight,
-        eventCard: instance.event_card ? {
-          image: instance.event_card.image,
-          eventName: instance.event_card.event_name || instance.event_card.eventName,
-          date: instance.event_card.date,
-          rewards: instance.event_card.rewards,
-        } : instance.eventCard,
-        statsCard: instance.stats_card ? {
-          image: instance.stats_card.image,
-          playersOnline: instance.stats_card.players_online || instance.stats_card.playersOnline,
-          latency: instance.stats_card.latency,
-          status: instance.stats_card.status,
-        } : instance.statsCard,
-        infoCard: instance.info_card ? {
-          image: instance.info_card.image,
-          modsInstalled: instance.info_card.mods_installed || instance.info_card.modsInstalled,
-          lastUpdate: instance.info_card.last_update || instance.info_card.lastUpdate,
-        } : instance.infoCard,
-        modloader: instance.modloader,
-        resolutionWidth: instance.resolution_width || instance.resolutionWidth,
-        resolutionHeight: instance.resolution_height || instance.resolutionHeight,
+      // 1. Cargar instancias globales de Supabase
+      const { data: globalInstances, error } = await supabase
+        .from('global_instances')
+        .select('*')
+        .eq('is_active', true);
+
+      if (error) throw error;
+
+      // 2. Mapear al formato local
+      const mappedInstances: Instance[] = (globalInstances || []).map(gi => ({
+        id: gi.id,
+        name: gi.name,
+        version: gi.mc_version,
+        lastPlayed: "Nunca",
+        icon: gi.icon_url || "default",
+        image: gi.icon_url || `https://api.dicebear.com/7.x/shapes/svg?seed=${gi.name}`,
+        path: "", // Se gestionará localmente al descargar
+        description: gi.description || undefined,
+        images: gi.images || undefined,
+        ram: gi.ram || undefined,
+        serverIp: gi.server_ip || undefined,
+        serverName: gi.server_name || undefined,
+        modpackUrl: gi.modpack_url || undefined,
+        modloader: gi.loader_type || "vanilla",
+        resolutionWidth: gi.resolution_width || undefined,
+        resolutionHeight: gi.resolution_height || undefined,
+        is_global: true
       }));
-      setInstances(instancesWithImages);
-      
-      // NO seleccionar automáticamente - mostrar pantalla de bienvenida
+
+      setInstances(mappedInstances);
     } catch (error) {
-      console.error("Error loading instances:", error);
-      // Cargar desde localStorage como fallback
+      console.error("Error loading instances from Supabase:", error);
+      // Fallback a local si falla
       const saved = localStorage.getItem("drk_instances");
-      if (saved) {
-        try {
-          const savedInstances = JSON.parse(saved);
-          setInstances(savedInstances);
-          // NO seleccionar automáticamente
-        } catch (e) {
-          console.error("Error parsing saved instances:", e);
-        }
-      }
+      if (saved) setInstances(JSON.parse(saved));
     }
   }
+
+  useEffect(() => {
+    // Escuchar cambios en tiempo real en las instancias
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'global_instances'
+        },
+        () => {
+          loadInstances();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    loadInstances();
+  }, [isLoggedIn]);
 
   function saveAccount(username: string, type: "microsoft" | "offline", avatar?: string) {
     const saved = localStorage.getItem("drk_saved_accounts");
@@ -297,10 +295,10 @@ function App() {
             setIsLoggedIn(true);
             setIsOfflineMode(false);
             setUsername(profile.name);
-            const avatar = `https://mc-heads.net/body/${profile.id}`;
+            const avatar = `https://mc-heads.net/skin/${profile.name}`;
             setUserAvatar(avatar);
             saveAccount(profile.name, "microsoft", avatar);
-            localStorage.setItem("drk_launcher_logged_in", "true");
+            localStorage.setItem("drk_launcher_logged_in", "false");
             localStorage.setItem("drk_launcher_username", profile.name);
             localStorage.setItem("drk_launcher_avatar", avatar);
             localStorage.setItem("drk_launcher_auth_type", "microsoft");
@@ -318,64 +316,58 @@ function App() {
     }
   }
 
-  async function handleOfflineLogin(username: string, email: string, password: string, isLogin: boolean) {
-    setIsLoginLoading(true);
-
-    try {
-      await invoke("start_offline_login", { username });
-      
-      if (isLogin) {
-        // Login
-        if (username.trim() && password.trim()) {
-          const avatar = `https://api.mineskin.org/render/body/${username}`;
-          setIsLoggedIn(true);
-          setIsOfflineMode(true);
-          setShowOfflineLogin(false);
-          setUsername(username);
-          setUserAvatar(avatar);
-          saveAccount(username, "offline", avatar);
-          localStorage.setItem("drk_launcher_logged_in", "true");
-          localStorage.setItem("drk_launcher_username", username);
-          localStorage.setItem("drk_launcher_avatar", avatar);
-          localStorage.setItem("drk_launcher_auth_type", "offline");
-          loadInstances();
-        } else {
-          alert("Por favor ingresa usuario y contraseña");
-        }
-      } else {
-        // Register
-        if (username.trim() && email.trim() && password.trim()) {
-          const avatar = `https://api.mineskin.org/render/body/${username}`;
-          setIsLoggedIn(true);
-          setIsOfflineMode(true);
-          setShowOfflineLogin(false);
-          setUsername(username);
-          setUserAvatar(avatar);
-          saveAccount(username, "offline", avatar);
-          localStorage.setItem("drk_launcher_logged_in", "true");
-          localStorage.setItem("drk_launcher_username", username);
-          localStorage.setItem("drk_launcher_avatar", avatar);
-          localStorage.setItem("drk_launcher_auth_type", "offline");
-          loadInstances();
-        } else {
-          alert("Por favor completa todos los campos");
-        }
+  async function handleLoginSuccess(username: string, _email: string, avatar: string, authType: "microsoft" | "offline") {
+    setIsLoggedIn(true);
+    setIsOfflineMode(authType === "offline");
+    setShowOfflineLogin(false);
+    setUsername(username);
+    setUserAvatar(avatar);
+    saveAccount(username, authType, avatar);
+    
+    // Sincronizar con el backend de Rust para el Gamertag
+    if (authType === "offline") {
+      try {
+        await invoke("start_offline_login", { username, avatar });
+      } catch (e) {
+        console.error("Failed to sync offline login with Rust:", e);
       }
-    } catch (e) {
-      console.error("Offline login failed", e);
     }
 
-    setIsLoginLoading(false);
+    localStorage.setItem("drk_launcher_logged_in", "true");
+    localStorage.setItem("drk_launcher_username", username);
+    localStorage.setItem("drk_launcher_avatar", avatar);
+    localStorage.setItem("drk_launcher_auth_type", authType);
+    loadInstances();
   }
 
   async function handleQuickLogin(account: SavedAccount) {
     setIsLoginLoading(true);
     
+    if (account.type === "microsoft") {
+      setIsLoginLoading(false);
+      handleMicrosoftLogin();
+      return;
+    }
+
+    // Si es offline, necesitamos verificar que el usuario existe en Supabase antes de dejarlo entrar
     if (account.type === "offline") {
       try {
-        await invoke("start_offline_login", { username: account.username });
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('username', account.username)
+          .single();
+
+        if (error || !profile) {
+          alert("La cuenta ya no existe en la base de datos centralizada.");
+          handleLogout();
+          setIsLoginLoading(false);
+          return;
+        }
       } catch (e) {
-        console.error("Quick login failed", e);
+        console.error("Quick login verify failed", e);
+        setIsLoginLoading(false);
+        return;
       }
     }
 
@@ -421,6 +413,8 @@ function App() {
     localStorage.removeItem("drk_launcher_username");
     localStorage.removeItem("drk_launcher_avatar");
     localStorage.removeItem("drk_launcher_auth_type");
+    localStorage.removeItem("drk_launcher_admin");
+    supabase.auth.signOut();
   }
 
   async function launchInstance(instance: Instance) {
@@ -432,6 +426,13 @@ function App() {
     setIsLaunching(true);
     setLaunchingInstanceId(instance.id);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const authData = {
+        id: user?.id || "offline-id",
+        name: username,
+        access_token: "offline-token",
+      };
+
       if (unlistenProgress) {
         try { (unlistenProgress as any)(); } catch {}
       }
@@ -442,6 +443,9 @@ function App() {
         if (p.stage === "iniciado") {
           setLastLaunchDurationMs(Date.now() - startTime);
           setLaunchProgress({ percent: 100, stage: "iniciado", message: "Jugando..." });
+          
+          // Auto-cierre desactivado permanentemente para asegurar persistencia de recursos
+          console.log("Minecraft iniciado. Launcher permanecerá abierto.");
         }
         if (p.stage === "cerrado" || p.stage === "crasheado" || p.stage === "error") {
           setIsLaunching(false);
@@ -489,7 +493,10 @@ function App() {
       }
 
       // Lanzar instancia (todos juegan de la misma forma)
-      await invoke("launch_instance", { instanceId: instance.id });
+      await invoke("launch_instance", { 
+        instanceId: instance.id, 
+        auth: authData 
+      });
       
       // Actualizar última vez jugado
       const timestamp = new Date().toISOString();
@@ -649,20 +656,73 @@ function App() {
 
   function handleSettings(instance: Instance) {
     setSettingsInstance(instance);
-    setSettingsDraft({
-      name: instance.name,
-      description: instance.description,
-      version: instance.version,
-      ram: instance.ram,
-      serverIp: instance.serverIp,
-      serverName: instance.serverName,
-      modpackUrl: instance.modpackUrl,
-      modloader: instance.modloader,
-      launcher: instance.launcher,
-      image: instance.image,
-      resolutionWidth: instance.resolutionWidth || 854,
-      resolutionHeight: instance.resolutionHeight || 480,
-    });
+  }
+
+  async function handleSaveSettings(updatedInstance: Instance) {
+    const updatedInstances = instances.map((inst) =>
+      inst.id === updatedInstance.id ? updatedInstance : inst
+    );
+    setInstances(updatedInstances);
+    if (selectedInstance?.id === updatedInstance.id) {
+      setSelectedInstance(updatedInstance);
+    }
+    
+    try {
+      await ensureInstanceSaved(updatedInstance);
+      localStorage.setItem("drk_instances", JSON.stringify(updatedInstances));
+      setSettingsInstance(null);
+      showToast("Ajustes guardados correctamente", "success");
+    } catch (error) {
+      console.error("Error saving settings:", error);
+      showToast("Error al guardar los ajustes", "error");
+    }
+  }
+
+  async function ensureInstanceSaved(instance: Instance) {
+    try {
+      const instanceForRust: any = {
+        id: instance.id,
+        name: instance.name,
+        version: instance.version,
+        last_played: instance.lastPlayed || new Date().toISOString(),
+        icon: instance.icon,
+        path: instance.path || "",
+        image: instance.image,
+        images: instance.images,
+        description: instance.description,
+        ram: instance.ram,
+        server_ip: instance.serverIp,
+        server_name: instance.serverName,
+        modpack_url: instance.modpackUrl,
+        mods: instance.mods,
+        launcher: instance.launcher || "official",
+        modloader: instance.modloader || "vanilla",
+        resolution_width: instance.resolutionWidth || 854,
+        resolution_height: instance.resolutionHeight || 480,
+        event_card: instance.eventCard ? {
+          image: instance.eventCard.image,
+          event_name: instance.eventCard.eventName,
+          date: instance.eventCard.date,
+          rewards: instance.eventCard.rewards,
+        } : undefined,
+        stats_card: instance.statsCard ? {
+          image: instance.statsCard.image,
+          players_online: instance.statsCard.playersOnline,
+          latency: instance.statsCard.latency,
+          status: instance.statsCard.status,
+        } : undefined,
+        info_card: instance.infoCard ? {
+          image: instance.infoCard.image,
+          mods_installed: instance.infoCard.modsInstalled,
+          last_update: instance.infoCard.lastUpdate,
+        } : undefined,
+      };
+      await invoke("save_instance", { instance: instanceForRust });
+      return true;
+    } catch (e) {
+      console.error("Error ensuring instance saved in Rust:", e);
+      return false;
+    }
   }
 
   async function handleDownloadInstance(instance: Instance, isPlayFlow = false) {
@@ -672,6 +732,10 @@ function App() {
       }
       setIsDownloading(true);
       setLaunchingInstanceId(instance.id);
+      
+      // Asegurarse de que la instancia esté guardada localmente en Rust antes de descargar
+      await ensureInstanceSaved(instance);
+
       if (unlistenProgress) {
         try { (unlistenProgress as any)(); } catch {}
       }
@@ -699,7 +763,7 @@ function App() {
           if (p.stage === "error") {
             try { (unlisten as any)(); } catch {}
             if (p.message) {
-              alert(p.message);
+              showToast(p.message, "error");
             }
             if (isPlayFlow) {
               setPlayFlowInstanceId(null);
@@ -712,7 +776,7 @@ function App() {
           await invoke("prepare_instance", { instanceId: instance.id });
         } catch (error) {
           console.error("Error downloading instance:", error);
-          alert("Error al descargar la instancia");
+          showToast("Error al preparar la descarga", "error");
           try { (unlisten as any)(); } catch {}
           if (isPlayFlow) {
             setPlayFlowInstanceId(null);
@@ -722,7 +786,7 @@ function App() {
       });
     } catch (error) {
       console.error("Error downloading instance:", error);
-      alert("Error al descargar la instancia");
+      showToast("Error al descargar la instancia", "error");
       setIsDownloading(false);
       setLaunchingInstanceId(null);
       return false;
@@ -736,7 +800,10 @@ function App() {
     setIsCheckingReady(true);
     
     try {
-      // Check if instance is ready to skip download/verify flow if possible
+      // 1. Asegurarse de que la instancia esté registrada en el backend
+      await ensureInstanceSaved(instance);
+
+      // 2. Verificar si está lista
       let isReady = false;
       try {
           isReady = await invoke<boolean>("check_instance_ready", { instanceId: instance.id });
@@ -771,88 +838,148 @@ function App() {
       confirmText: "Eliminar",
       onConfirm: async () => {
         try {
+          // Si es una instancia global (tiene ID de Supabase), eliminar de la base de datos
+          if (instanceId.includes("-")) { // Los UUID de Supabase suelen tener guiones
+            const { error } = await supabase
+              .from('global_instances')
+              .delete()
+              .eq('id', instanceId);
+            
+            if (error) throw error;
+            showToast("Instancia eliminada de la nube", "info");
+          }
+
           await invoke("delete_instance", { instanceId });
           setInstances(prev => prev.filter(i => i.id !== instanceId));
           if (selectedInstance?.id === instanceId) {
             setSelectedInstance(null);
           }
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
-        } catch (error) {
+          showToast("Instancia eliminada localmente", "success");
+        } catch (error: any) {
           console.error("Error deleting instance:", error);
-          alert("Error al eliminar la instancia");
+          showToast("Error al eliminar: " + error.message, "error");
         }
       }
     });
   }
 
-  // Mostrar pantalla de login offline
-  if (showOfflineLogin) {
-    return (
-      <OfflineLogin
-        onBack={() => setShowOfflineLogin(false)}
-        onLogin={handleOfflineLogin}
-        isLoading={isLoginLoading}
-      />
-    );
-  }
+  const handleUpdateUser = (newUsername: string, newAvatar: string) => {
+    setUsername(newUsername);
+    setUserAvatar(newAvatar);
+    localStorage.setItem("drk_launcher_username", newUsername);
+    localStorage.setItem("drk_launcher_avatar", newAvatar);
+    
+    // Si estamos en modo offline, sincronizar con Rust
+    if (isOfflineMode) {
+      invoke("start_offline_login", { username: newUsername, avatar: newAvatar }).catch(console.error);
+    }
+  };
 
-  // Mostrar pantalla de login principal
-  if (!isLoggedIn) {
-    return (
-      <>
-        <Login
-          onMicrosoftLogin={handleMicrosoftLogin}
-          onOfflineLogin={() => setShowOfflineLogin(true)}
-          onQuickLogin={handleQuickLogin}
-          isLoading={isLoginLoading}
-        />
-      </>
-    );
-  }
-
-  // Mostrar pantalla principal con sidebar y home
   return (
     <div className="app-container">
-      <div className="app-background">
-        <div className="app-stars"></div>
-        <div className="app-nebula app-nebula-1"></div>
-        <div className="app-nebula app-nebula-2"></div>
-        <div className="app-nebula app-nebula-3"></div>
-      </div>
-      <Sidebar
-        instances={instances}
-        selectedInstance={selectedInstance}
-        onSelectInstance={setSelectedInstance}
-        onCreateInstance={() => setShowCreateInstance(true)}
-        isOfflineMode={isOfflineMode}
-        onLogout={handleLogout}
-        userAvatar={userAvatar}
-        username={username}
-        isAdmin={isAdmin}
-        onDeleteInstance={handleDeleteInstance}
-        onOpenAdminLogin={() => setShowAdminLogin(true)}
-      />
-      <Home
-        selectedInstance={selectedInstance}
-        isLaunching={isLaunching}
-        launchProgress={launchProgress}
-        isDownloading={isDownloading}
-        launchingInstanceId={launchingInstanceId}
-        launchDurationMs={lastLaunchDurationMs}
-        playFlowInstanceId={playFlowInstanceId}
-        isCheckingReady={isCheckingReady}
-        onSettings={handleSettings}
-        instances={instances}
-        onDownloadInstance={handleDownloadInstance}
-        onExecuteInstance={handleExecuteInstance}
-        onHome={() => setSelectedInstance(null)}
-      />
-      {showCreateInstance && (
-        <CreateInstance
-          onClose={() => setShowCreateInstance(false)}
-          onSave={handleCreateInstance}
-        />
+      {/* Sistema Global de Toasts */}
+      {toast && (
+        <div className="drk-toast-container">
+          <Toast 
+            message={toast.message} 
+            type={toast.type} 
+            onClose={() => setToast(null)} 
+          />
+        </div>
       )}
+
+      {!isLoggedIn ? (
+        showOfflineLogin ? (
+          <OfflineLogin 
+            onBack={() => setShowOfflineLogin(false)} 
+            onLogin={handleLoginSuccess}
+            isLoading={isLoginLoading}
+            showToast={showToast}
+          />
+        ) : (
+          <Login 
+            onMicrosoftLogin={handleMicrosoftLogin} 
+            onOfflineLogin={() => setShowOfflineLogin(true)}
+            onQuickLogin={handleQuickLogin}
+            isLoading={isLoginLoading}
+            showToast={showToast}
+          />
+        )
+      ) : (
+        <>
+          <div className="app-background">
+            <div className="app-stars"></div>
+            <div className="app-nebula"></div>
+          </div>
+          <div className="app-main-layout" style={{ display: 'flex', width: '100%', height: '100%', position: 'relative', zIndex: 1 }}>
+            <Sidebar
+              instances={instances}
+              selectedInstance={selectedInstance}
+              onSelectInstance={(instance) => {
+                setSelectedInstance(instance);
+                setCurrentView("home");
+              }}
+              onCreateInstance={() => setShowCreateInstance(true)}
+              onHome={() => setCurrentView("home")}
+              userAvatar={userAvatar}
+              username={username}
+              isAdmin={isAdmin}
+              onDeleteInstance={handleDeleteInstance}
+              onOpenAdminLogin={() => {
+                if (isAdmin) {
+                  setCurrentView("admin-dashboard");
+                } else {
+                  setShowAdminLogin(true);
+                }
+              }}
+              onProfile={() => setCurrentView("profile")}
+              onGlobalSettings={() => setCurrentView("settings")}
+              onLogout={handleLogout}
+              isOfflineMode={isOfflineMode}
+            />
+            <div className="view-container">
+              {currentView === "home" && (
+                <Home
+                  selectedInstance={selectedInstance}
+                  isLaunching={isLaunching}
+                  launchProgress={launchProgress}
+                  isDownloading={isDownloading}
+                  launchingInstanceId={launchingInstanceId}
+                  launchDurationMs={lastLaunchDurationMs}
+                  playFlowInstanceId={playFlowInstanceId}
+                  isCheckingReady={isCheckingReady}
+                  onSettings={handleSettings}
+                  instances={instances}
+                  onDownloadInstance={handleDownloadInstance}
+                  onExecuteInstance={handleExecuteInstance}
+                  onHome={() => setSelectedInstance(null)}
+                  showToast={showToast}
+                />
+              )}
+              {currentView === "profile" && (
+                <Profile 
+                  showToast={showToast} 
+                  onUpdateUser={handleUpdateUser} 
+                />
+              )}
+              {currentView === "settings" && <Settings showToast={showToast} />}
+              {currentView === "admin-dashboard" && (
+                <AdminDashboard 
+                  onBack={() => setCurrentView("home")} 
+                  showToast={showToast} 
+                />
+              )}
+            </div>
+          </div>
+          {showCreateInstance && (
+            <CreateInstance 
+              onClose={() => setShowCreateInstance(false)} 
+              onSave={handleCreateInstance}
+              onCreated={loadInstances}
+              showToast={showToast}
+            />
+          )}
       {showAdminLogin && (
         <AdminLogin
           onClose={() => setShowAdminLogin(false)}
@@ -874,320 +1001,18 @@ function App() {
         error={crashData.error}
         code={crashData.code}
       />
-      {settingsInstance && settingsDraft && (
-        <div className="instance-settings-overlay" onClick={() => setSettingsInstance(null)}>
-          <div className="instance-settings-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="instance-settings-header">
-              <h3 className="instance-settings-title">Ajustes de {settingsInstance.name}</h3>
-              <button className="instance-settings-close" onClick={() => setSettingsInstance(null)}>×</button>
-            </div>
-            <div className="instance-settings-content">
-              {launchProgress && launchingInstanceId === settingsInstance.id && (launchProgress.stage === "error" || launchProgress.stage === "crasheado") && (
-                <div style={{ marginBottom: 10, padding: 10, background: "#2b2f3a", border: "1px solid #444", borderRadius: 6, color: "#e5e7eb" }}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                    {launchProgress.stage === "error" ? "Error de arranque" : "El juego se cerró con error"}
-                  </div>
-                  <div style={{ whiteSpace: "pre-wrap" }}>{launchProgress.message}</div>
-                </div>
-              )}
-              <div className="instance-settings-grid">
-                <div className="instance-settings-readonly">
-                  <span>Nombre</span>
-                  <strong>{settingsInstance.name}</strong>
-                </div>
-                <div className="instance-settings-readonly">
-                  <span>Versión</span>
-                  <strong>{settingsInstance.version}</strong>
-                </div>
-                <div className="instance-settings-field">
-                  <label>RAM (MB)</label>
-                  <input
-                    type="number"
-                    value={settingsDraft.ram || 0}
-                    onChange={(e) => setSettingsDraft({ ...settingsDraft, ram: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="instance-settings-field">
-                  <label>Resolución</label>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <input
-                      type="number"
-                      placeholder="Ancho"
-                      value={settingsDraft.resolutionWidth || 854}
-                      onChange={(e) => setSettingsDraft({ ...settingsDraft, resolutionWidth: Number(e.target.value) })}
-                      style={{ width: '50%' }}
-                    />
-                    <input
-                      type="number"
-                      placeholder="Alto"
-                      value={settingsDraft.resolutionHeight || 480}
-                      onChange={(e) => setSettingsDraft({ ...settingsDraft, resolutionHeight: Number(e.target.value) })}
-                      style={{ width: '50%' }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="instance-settings-actions">
-              <button
-                className="instance-settings-cancel"
-                onClick={() => {
-                  const path = settingsInstance.path;
-                  invoke("open_folder", { path }).catch(() => alert("No se pudo abrir la carpeta de la instancia"));
-                }}
-              >
-                Ver Instancia
-              </button>
-              <button
-                className="instance-settings-cancel"
-                onClick={() => {
-                  const path = settingsInstance.path + "\\logs";
-                  invoke("open_folder", { path }).catch(() => alert("No se pudo abrir la carpeta de logs"));
-                }}
-              >
-                Ver Logs
-              </button>
-              <button
-                className="instance-settings-cancel"
-                onClick={() => setSettingsInstance(null)}
-              >
-                Cancelar
-              </button>
-              <button
-                className="instance-settings-save"
-                onClick={async () => {
-                  const updatedInstance: Instance = {
-                    ...settingsInstance,
-                    ram: settingsDraft.ram,
-                    resolutionWidth: settingsDraft.resolutionWidth,
-                    resolutionHeight: settingsDraft.resolutionHeight,
-                  };
-                  const updatedInstances = instances.map((inst) =>
-                    inst.id === updatedInstance.id ? updatedInstance : inst
-                  );
-                  setInstances(updatedInstances);
-                  if (selectedInstance?.id === updatedInstance.id) {
-                    setSelectedInstance(updatedInstance);
-                  }
-                  try {
-                    const instanceForRust: any = {
-                      id: updatedInstance.id,
-                      name: updatedInstance.name,
-                      version: updatedInstance.version,
-                      last_played: updatedInstance.lastPlayed,
-                      icon: updatedInstance.icon,
-                      path: updatedInstance.path,
-                      image: updatedInstance.image,
-                      images: updatedInstance.images,
-                      description: updatedInstance.description,
-                      ram: updatedInstance.ram,
-                      server_ip: updatedInstance.serverIp,
-                      server_name: updatedInstance.serverName,
-                      modpack_url: updatedInstance.modpackUrl,
-                      mods: updatedInstance.mods,
-                      launcher: updatedInstance.launcher,
-                      resolution_width: updatedInstance.resolutionWidth,
-                      resolution_height: updatedInstance.resolutionHeight,
-                      event_card: updatedInstance.eventCard ? {
-                        image: updatedInstance.eventCard.image,
-                        event_name: updatedInstance.eventCard.eventName,
-                        date: updatedInstance.eventCard.date,
-                        rewards: updatedInstance.eventCard.rewards,
-                      } : undefined,
-                      stats_card: updatedInstance.statsCard ? {
-                        image: updatedInstance.statsCard.image,
-                        players_online: updatedInstance.statsCard.playersOnline,
-                        latency: updatedInstance.statsCard.latency,
-                        status: updatedInstance.statsCard.status,
-                      } : undefined,
-                      info_card: updatedInstance.infoCard ? {
-                        image: updatedInstance.infoCard.image,
-                        mods_installed: updatedInstance.infoCard.modsInstalled,
-                        last_update: updatedInstance.infoCard.lastUpdate,
-                      } : undefined,
-                      modloader: updatedInstance.modloader,
-                    };
-                    await invoke("save_instance", { instance: instanceForRust });
-                    localStorage.setItem("drk_instances", JSON.stringify(updatedInstances));
-                  } catch (error) {
-                    console.error("Error saving settings:", error);
-                    alert("No se pudieron guardar los ajustes");
-                  }
-                  setSettingsInstance(null);
-                }}
-              >
-                Guardar
-              </button>
-            </div>
-          </div>
-        </div>
+      {settingsInstance && (
+        <InstanceSettings
+          instance={settingsInstance}
+          isAdmin={isAdmin}
+          onClose={() => setSettingsInstance(null)}
+          onSave={handleSaveSettings}
+          onOpenFolder={(path) => invoke("open_folder", { path }).catch(() => showToast("No se pudo abrir la carpeta", "error"))}
+          onDelete={handleDeleteInstance}
+        />
       )}
-      {advancedInstance && advancedDraft && (
-        <div className="admin-settings-overlay" onClick={() => setAdvancedInstance(null)}>
-          <div className="admin-settings-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="admin-settings-header">
-              <h3 className="admin-settings-title">Panel avanzado · {advancedInstance.name}</h3>
-              <button className="admin-settings-close" onClick={() => setAdvancedInstance(null)}>×</button>
-            </div>
-            <div className="admin-settings-content">
-              <div className="admin-settings-grid">
-                <div className="admin-settings-field">
-                  <label>Nombre</label>
-                  <input
-                    value={advancedDraft.name}
-                    onChange={(e) => setAdvancedDraft({ ...advancedDraft, name: e.target.value })}
-                  />
-                </div>
-                <div className="admin-settings-field">
-                  <label>Versión</label>
-                  <input
-                    value={advancedDraft.version}
-                    onChange={(e) => setAdvancedDraft({ ...advancedDraft, version: e.target.value })}
-                  />
-                </div>
-                <div className="admin-settings-field">
-                  <label>RAM (MB)</label>
-                  <input
-                    type="number"
-                    value={advancedDraft.ram || 0}
-                    onChange={(e) => setAdvancedDraft({ ...advancedDraft, ram: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="admin-settings-field">
-                  <label>IP del servidor</label>
-                  <input
-                    value={advancedDraft.serverIp || ""}
-                    onChange={(e) => setAdvancedDraft({ ...advancedDraft, serverIp: e.target.value })}
-                  />
-                </div>
-                <div className="admin-settings-field">
-                  <label>Nombre del servidor</label>
-                  <input
-                    value={advancedDraft.serverName || ""}
-                    onChange={(e) => setAdvancedDraft({ ...advancedDraft, serverName: e.target.value })}
-                  />
-                </div>
-                <div className="admin-settings-field">
-                  <label>Modpack URL</label>
-                  <input
-                    value={advancedDraft.modpackUrl || ""}
-                    onChange={(e) => setAdvancedDraft({ ...advancedDraft, modpackUrl: e.target.value })}
-                  />
-                </div>
-                <div className="admin-settings-field">
-                  <label>Modloader</label>
-                  <select
-                    value={advancedDraft.modloader || "vanilla"}
-                    onChange={(e) => setAdvancedDraft({ ...advancedDraft, modloader: e.target.value })}
-                  >
-                    <option value="vanilla">Vanilla</option>
-                    <option value="fabric">Fabric</option>
-                    <option value="forge">Forge</option>
-                  </select>
-                </div>
-                <div className="admin-settings-field">
-                  <label>Launcher</label>
-                  <input
-                    value={advancedDraft.launcher || ""}
-                    onChange={(e) => setAdvancedDraft({ ...advancedDraft, launcher: e.target.value })}
-                  />
-                </div>
-                <div className="admin-settings-field">
-                  <label>Imagen principal</label>
-                  <input
-                    value={advancedDraft.image || ""}
-                    onChange={(e) => setAdvancedDraft({ ...advancedDraft, image: e.target.value })}
-                  />
-                </div>
-                <div className="admin-settings-field admin-settings-field-full">
-                  <label>Descripción</label>
-                  <textarea
-                    value={advancedDraft.description || ""}
-                    onChange={(e) => setAdvancedDraft({ ...advancedDraft, description: e.target.value })}
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="admin-settings-actions">
-              <button
-                className="admin-settings-cancel"
-                onClick={() => setAdvancedInstance(null)}
-              >
-                Cancelar
-              </button>
-              <button
-                className="admin-settings-save"
-                onClick={async () => {
-                  const updatedInstance: Instance = {
-                    ...advancedInstance,
-                    name: advancedDraft.name,
-                    description: advancedDraft.description,
-                    version: advancedDraft.version,
-                    ram: advancedDraft.ram,
-                    serverIp: advancedDraft.serverIp,
-                    serverName: advancedDraft.serverName,
-                    modpackUrl: advancedDraft.modpackUrl,
-                    modloader: advancedDraft.modloader,
-                    launcher: advancedDraft.launcher,
-                    image: advancedDraft.image,
-                  };
-                  const updatedInstances = instances.map((inst) =>
-                    inst.id === updatedInstance.id ? updatedInstance : inst
-                  );
-                  setInstances(updatedInstances);
-                  if (selectedInstance?.id === updatedInstance.id) {
-                    setSelectedInstance(updatedInstance);
-                  }
-                  try {
-                    const instanceForRust: any = {
-                      id: updatedInstance.id,
-                      name: updatedInstance.name,
-                      version: updatedInstance.version,
-                      last_played: updatedInstance.lastPlayed,
-                      icon: updatedInstance.icon,
-                      path: updatedInstance.path,
-                      image: updatedInstance.image,
-                      images: updatedInstance.images,
-                      description: updatedInstance.description,
-                      ram: updatedInstance.ram,
-                      server_ip: updatedInstance.serverIp,
-                      server_name: updatedInstance.serverName,
-                      modpack_url: updatedInstance.modpackUrl,
-                      mods: updatedInstance.mods,
-                      launcher: updatedInstance.launcher,
-                      event_card: updatedInstance.eventCard ? {
-                        image: updatedInstance.eventCard.image,
-                        event_name: updatedInstance.eventCard.eventName,
-                        date: updatedInstance.eventCard.date,
-                        rewards: updatedInstance.eventCard.rewards,
-                      } : undefined,
-                      stats_card: updatedInstance.statsCard ? {
-                        image: updatedInstance.statsCard.image,
-                        players_online: updatedInstance.statsCard.playersOnline,
-                        latency: updatedInstance.statsCard.latency,
-                        status: updatedInstance.statsCard.status,
-                      } : undefined,
-                      info_card: updatedInstance.infoCard ? {
-                        image: updatedInstance.infoCard.image,
-                        mods_installed: updatedInstance.infoCard.modsInstalled,
-                        last_update: updatedInstance.infoCard.lastUpdate,
-                      } : undefined,
-                      modloader: updatedInstance.modloader,
-                    };
-                    await invoke("save_instance", { instance: instanceForRust });
-                    localStorage.setItem("drk_instances", JSON.stringify(updatedInstances));
-                  } catch (error) {
-                    console.error("Error saving settings:", error);
-                    alert("No se pudieron guardar los ajustes");
-                  }
-                  setAdvancedInstance(null);
-                }}
-              >
-                Guardar
-              </button>
-            </div>
-          </div>
-        </div>
+
+        </>
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import "./Sidebar.css";
 import { Lock, Unlock, LogOut, Settings, User, Plus } from "lucide-react";
+import Skin3D from "../Skin3D/Skin3D";
 
 interface Instance {
   id: string;
@@ -17,6 +18,7 @@ interface SidebarProps {
   selectedInstance: Instance | null;
   onSelectInstance: (instance: Instance) => void;
   onCreateInstance: () => void;
+  onHome: () => void;
   isOfflineMode: boolean;
   onLogout: () => void;
   userAvatar?: string;
@@ -24,6 +26,8 @@ interface SidebarProps {
   isAdmin?: boolean;
   onDeleteInstance?: (id: string) => void;
   onOpenAdminLogin?: () => void;
+  onProfile: () => void;
+  onGlobalSettings: () => void;
 }
 
 export default function Sidebar({
@@ -31,14 +35,16 @@ export default function Sidebar({
   selectedInstance,
   onSelectInstance,
   onCreateInstance,
+  onHome,
   userAvatar,
   username,
   isAdmin,
   onDeleteInstance,
   onOpenAdminLogin,
+  onProfile,
+  onGlobalSettings,
   onLogout,
 }: SidebarProps) {
-  const avatarUrl = userAvatar || `https://api.mineskin.org/render/body/8667ba71-b85a-4005-af54-45751bd8e8c7`;
   const [hoverPreview, setHoverPreview] = useState<{
     instance: Instance;
     top: number;
@@ -47,6 +53,17 @@ export default function Sidebar({
   const [permissionDenied, setPermissionDenied] = useState<{ x: number, y: number } | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // If there's no userAvatar, we can use a default name-based skin or Steve
+  // Also sanitizing old render URLs that might be saved in profile
+  const getSanitizedAvatar = () => {
+    if (!userAvatar || userAvatar.includes("mineskin.org/render")) {
+      return username ? `https://mc-heads.net/skin/${username}` : `https://mc-heads.net/skin/steve`;
+    }
+    return userAvatar;
+  };
+
+  const finalSkinUrl = getSanitizedAvatar();
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -84,7 +101,13 @@ export default function Sidebar({
   }
 
   return (
-    <div className="sidebar-container">
+    <div className="sidebar-container glass-panel">
+      <div className="sidebar-top">
+        <div className="sidebar-logo" onClick={onHome} style={{ cursor: "pointer" }}>
+          <div className="logo-glow"></div>
+          <span className="logo-text">DRK</span>
+        </div>
+      </div>
       <div className="sidebar-instances">
         {instances.length === 0 ? (
           <div className="sidebar-empty">
@@ -153,10 +176,16 @@ export default function Sidebar({
       <div className="sidebar-footer">
         <button 
           className={`sidebar-admin-button ${isAdmin ? "active" : ""}`}
-          onClick={() => isAdmin ? null : onOpenAdminLogin?.()}
-          title={isAdmin ? "Modo Administrador" : "Acceso Admin"}
+          onClick={() => {
+            if (isAdmin) {
+              onOpenAdminLogin?.();
+            } else {
+              onOpenAdminLogin?.();
+            }
+          }}
+          title={isAdmin ? "Panel de Administración" : "Acceso Admin"}
         >
-          {isAdmin ? <Unlock size={16} /> : <Lock size={16} />}
+          {isAdmin ? <Unlock size={24} /> : <Lock size={24} />}
         </button>
 
         <button 
@@ -179,22 +208,14 @@ export default function Sidebar({
             onClick={() => setShowUserMenu(!showUserMenu)}
             title={username || "Usuario"}
           >
-            {userAvatar ? (
-              <img 
-                src={avatarUrl} 
-                alt={username || "Usuario"}
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  // Si falla, ocultamos la imagen para mostrar el icono de fallback (User)
-                  target.style.display = 'none';
-                  // Opcional: setear un estado de error local si quisiéramos renderizar <User /> condicionalmente
-                }}
-              />
-            ) : null}
-            {/* Fallback icon always rendered underneath or if no avatar */}
-            <div className="sidebar-user-fallback-icon">
-               <User size={24} />
-            </div>
+            <Skin3D 
+              skinUrl={finalSkinUrl} 
+              width={42} 
+              height={42} 
+              autoRotate={true}
+              walking={false}
+              className="sidebar-3d-skin"
+            />
           </div>
           
           {showUserMenu && (
@@ -204,15 +225,19 @@ export default function Sidebar({
                 {isAdmin && <span className="sidebar-user-menu-role">Admin</span>}
               </div>
               <div className="sidebar-user-menu-divider"></div>
-              <button className="sidebar-user-menu-item" onClick={(e) => handleActionRestricted(e)}>
+              
+              <button className="sidebar-user-menu-item" onClick={() => { onProfile(); setShowUserMenu(false); }}>
                 <User size={16} />
                 <span>Perfil</span>
               </button>
-              <button className="sidebar-user-menu-item" onClick={(e) => handleActionRestricted(e)}>
+
+              <button className="sidebar-user-menu-item" onClick={() => { onGlobalSettings(); setShowUserMenu(false); }}>
                 <Settings size={16} />
                 <span>Configuración</span>
               </button>
+              
               <div className="sidebar-user-menu-divider"></div>
+              
               <button className="sidebar-user-menu-item logout" onClick={onLogout}>
                 <LogOut size={16} />
                 <span>Cerrar Sesión</span>

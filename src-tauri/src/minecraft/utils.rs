@@ -107,6 +107,12 @@ pub fn replace_vars(
     result = result.replace("${assets_index_name}", asset_index_id);
     result = result.replace("${auth_uuid}", &auth.id);
     result = result.replace("${auth_access_token}", &auth.access_token);
+    result = result.replace("${clientid}", "0");
+    result = result.replace("${auth_xuid}", "0");
+    result = result.replace("${quickPlayPath}", "");
+    result = result.replace("${quickPlaySingleplayer}", "");
+    result = result.replace("${quickPlayMultiplayer}", "");
+    result = result.replace("${quickPlayRealms}", "");
     if auth.access_token == "offline" {
         result = result.replace("${user_type}", "legacy");
     } else {
@@ -117,6 +123,7 @@ pub fn replace_vars(
     result = result.replace("${launcher_name}", "DrkLauncher");
     result = result.replace("${launcher_version}", "1.0");
     result = result.replace("${library_directory}", &libraries_dir.to_string_lossy());
+    result = result.replace("${user_properties}", "{}");
     
     let cp_sep = if get_os_name() == "windows" { ";" } else { ":" };
     result = result.replace("${classpath_separator}", cp_sep);

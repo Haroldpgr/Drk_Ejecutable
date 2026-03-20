@@ -79,7 +79,9 @@ pub fn build_fabric_command(
     instance_minecraft_dir: &Path,
     info: &VersionInfo,
     auth: &MinecraftProfile,
-    ram_mb: u64
+    ram_mb: u64,
+    width: Option<u32>,
+    height: Option<u32>
 ) -> Result<Command, String> {
     let assets_dir = base_path.join("assets");
     let libraries_dir = base_path.join("libraries");
@@ -266,12 +268,16 @@ pub fn build_fabric_command(
     cmd.arg("--gameDir").arg(instance_minecraft_dir);
     cmd.arg("--assetsDir").arg(assets_dir);
     cmd.arg("--assetIndex").arg(asset_index_id);
+    cmd.arg("--username").arg(&auth.name);
     cmd.arg("--uuid").arg(&auth.id);
     cmd.arg("--accessToken").arg(&auth.access_token);
     cmd.arg("--userType").arg("mojang");
     cmd.arg("--versionType").arg("loader");
-    cmd.arg("--width").arg("854");
-    cmd.arg("--height").arg("480");
+    
+    // Resolución dinámica
+    cmd.arg("--width").arg(width.unwrap_or(854).to_string());
+    cmd.arg("--height").arg(height.unwrap_or(480).to_string());
+    
     Ok(cmd)
 }
 

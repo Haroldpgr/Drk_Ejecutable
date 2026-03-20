@@ -88,6 +88,7 @@ pub fn download_forge(
     instance_id: &str
 ) -> Result<VersionInfo, String> {
     let assets_dir = base_path.join("assets");
+    let base_libraries_dir = base_path.join("libraries");
     let libraries_dir = instance_minecraft_dir
         .parent()
         .map(|p| p.join("libraries"))
@@ -136,7 +137,43 @@ pub fn download_forge(
                     if let Some(path_str) = &artifact.path {
                         let target = libraries_dir.join(path_str);
                         let _ = fs::create_dir_all(target.parent().unwrap());
-                        let _ = download_file(&artifact.url, &target, Some(&artifact.sha1));
+                        if !target.exists() {
+                            let base_copy = base_libraries_dir.join(path_str);
+                            if base_copy.exists() {
+                                let _ = fs::copy(&base_copy, &target);
+                            }
+                        }
+                        if !target.exists() {
+                            let mut url = artifact.url.clone();
+                            if url.trim().is_empty() {
+                                let base_url = lib.url.clone().unwrap_or_else(|| {
+                                    if path_str.starts_with("net/minecraftforge/")
+                                        || path_str.starts_with("de/oceanlabs/")
+                                        || path_str.starts_with("cpw/mods/")
+                                    {
+                                        "https://maven.minecraftforge.net/".to_string()
+                                    } else {
+                                        "https://libraries.minecraft.net/".to_string()
+                                    }
+                                });
+                                url = format!("{}{}", ensure_trailing_slash(&base_url), path_str);
+                            }
+
+                            let res = download_file(&url, &target, Some(&artifact.sha1));
+                            if res.is_err() {
+                                let alt = format!("https://maven.creeperhost.net/{}", path_str);
+                                let _ = download_file(&alt, &target, Some(&artifact.sha1));
+                            }
+                            if res.is_err() && (
+                                lib.name.contains("net.minecraftforge:forge:")
+                                    || lib.name.contains("net.minecraftforge:fmlloader:")
+                                    || lib.name.contains("net.minecraftforge:bootstrap:")
+                                    || lib.name.contains("net.minecraftforge:bootstrap-api:")
+                                    || lib.name.contains("net.minecraftforge:modlauncher:")
+                            ) {
+                                return Err(format!("No se pudo descargar librería crítica: {}", lib.name));
+                            }
+                        }
                     }
                 }
                 if let Some(classifiers) = &downloads.classifiers {
@@ -148,7 +185,14 @@ pub fn download_forge(
                                 if let Some(path_str) = &artifact.path {
                                     let target = libraries_dir.join(path_str);
                                     let _ = fs::create_dir_all(target.parent().unwrap());
-                                    let _ = download_file(&artifact.url, &target, Some(&artifact.sha1));
+                                    if !target.exists() {
+                                        let mut url = artifact.url.clone();
+                                        if url.trim().is_empty() {
+                                            let base_url = lib.url.clone().unwrap_or_else(|| "https://libraries.minecraft.net/".to_string());
+                                            url = format!("{}{}", ensure_trailing_slash(&base_url), path_str);
+                                        }
+                                        let _ = download_file(&url, &target, Some(&artifact.sha1));
+                                    }
                                     let _ = extract_natives(&target, &natives_dir);
                                 }
                             }
@@ -190,7 +234,9 @@ pub fn build_forge_command(
     instance_minecraft_dir: &Path,
     info: &VersionInfo,
     auth: &MinecraftProfile,
-    ram_mb: u64
+    ram_mb: u64,
+    width: Option<u32>,
+    height: Option<u32>
 ) -> Result<Command, String> {
     let assets_dir = base_path.join("assets");
     let libraries_dir = instance_minecraft_dir
@@ -199,6 +245,31 @@ pub fn build_forge_command(
         .unwrap_or_else(|| instance_minecraft_dir.join("libraries"));
     let _versions_dir = base_path.join("versions");
     let natives_dir = instance_minecraft_dir.join("natives");
+
+    // Forge 1.21+ requires the forge client jar (it is referenced in version.json but sometimes has empty URLs).
+    // If it's missing, fail fast with a clear error instead of crashing later in ModLauncher.
+    let mut missing_critical: Vec<String> = Vec::new();
+    for lib in &info.libraries {
+        if lib.name.contains("net.minecraftforge:forge:") && lib.name.ends_with(":client") {
+            let mut found = false;
+            if let Some(downloads) = &lib.downloads {
+                if let Some(artifact) = &downloads.artifact {
+                    if let Some(path_str) = &artifact.path {
+                        found = libraries_dir.join(path_str).exists();
+                    }
+                }
+            }
+            if !found {
+                missing_critical.push(lib.name.clone());
+            }
+        }
+    }
+    if !missing_critical.is_empty() {
+        return Err(format!(
+            "Faltan librerías críticas de Forge (cliente). Reintenta para que se descarguen: {}",
+            missing_critical.join(", ")
+        ));
+    }
     let required_java = info.java_version.as_ref().map(|v| v.major_version).unwrap_or_else(|| get_required_java_version(&info.id));
     let java_path = match get_java_path_for_major(required_java) {
         Ok(p) => p,
@@ -402,26 +473,16 @@ pub fn build_forge_command(
                                         if s == "-p" || s == "--module-path" { skip_next = true; continue; }
                                         if s == "${classpath}" { continue; }
                                         if s == "${module_path}" { continue; }
+                                        if (s.starts_with("--add-exports") || s.starts_with("--add-opens")) && s.contains("cpw.mods.") { continue; }
                                         if s.starts_with("-DignoreList=") { continue; }
                                         let val = replace_vars(s, auth, &info.id, &assets_dir, instance_minecraft_dir, asset_index_id, &natives_dir, &libraries_dir);
                                         if val.starts_with("-DignoreList=") { continue; }
                                         args_content.push_str(&format!("{}\n", escape_arg(&val)));
                                     }
-                                     
-   if (s.starts_with("--add-exports") || s.starts_with("--add-opens")) && s.contains("cpw.mods.") { continue; }
                                 }
                             }
                         }
                     }
-                }
-            }
-        }
-    }
-
-    let cp_sep = if get_os_name() == "windows" { ";" } else { ":" };
-    let mut unique_entries = std::collections::HashSet::new();
-    let mut final_classpath = Vec::new();
-    let mut module_path_artifacts = std::collections::HashSet::new();
                 }
             }
         }
@@ -436,11 +497,7 @@ pub fn build_forge_command(
             module_path_artifacts.insert((maven.group.clone(), maven.artifact.clone()));
         }
     }
-    let forge_classpath_blacklist = [
-        "asm", "asm-commons", "asm-tree", "asm-util", "asm-analysis",
-        "java-objc-bridge", "jna", "oshi-core",
-        "sponge-mixin", "mixin", "jakarta.activation", "jakarta.xml.bind"
-    ];
+    let forge_classpath_blacklist: [&str; 0] = [];
     for entry in classpath_entries {
         if unique_entries.insert(entry.clone()) {
             let normalized_entry = normalize_path_for_comparison(&entry);
@@ -582,7 +639,7 @@ pub fn build_forge_command(
         .join(cp_sep);
     args_content.push_str("-cp\n");
     args_content.push_str(&format!("{}\n", escape_arg(&cp_str)));
-    
+
     // Select effective main class for Forge with fallback
     let mut bootstrap_target: Option<PathBuf> = None;
     for (_, maven) in &library_map {
@@ -616,8 +673,10 @@ pub fn build_forge_command(
     };
     args_content.push_str(&format!("{}\n", escape_arg(&effective_main_class)));
 
-    args_content.push_str("--width\n854\n");
-    args_content.push_str("--height\n480\n");
+    args_content.push_str("--width\n");
+    args_content.push_str(&format!("{}\n", width.unwrap_or(854)));
+    args_content.push_str("--height\n");
+    args_content.push_str(&format!("{}\n", height.unwrap_or(480)));
 
     if let Some(args) = &info.arguments {
         if let Some(game_args) = &args.game {
@@ -671,8 +730,6 @@ pub fn build_forge_command(
         }
     }
 
-    let _ = fs::write(&args_file_path, args_content.clone());
-
     let logs_dir = instance_minecraft_dir.join("logs");
     let _ = fs::create_dir_all(&logs_dir);
     let mut lib_checks: Vec<String> = Vec::new();
@@ -700,6 +757,8 @@ pub fn build_forge_command(
         }
     }
     let final_mp_dbg = module_path_set.into_iter().collect::<Vec<_>>().join(mp_sep);
+    let temp_args_file_path = std::env::temp_dir().join(format!("drklauncher_forge_args_{}.txt", info.id));
+    let args_content_for_java = args_content.replace('\\', "/");
     let debug_content = format!(
         "JAVA_PATH={}\nJAVA_MAJOR={}\nJAVA_REQUIRED={}\nWORK_DIR={}\nNATIVES_DIR={}\nMAIN_CLASS={}\nMODULE_PATH={}\nCLASSPATH={}\nJVM_FLAGS={}\nARGS_FILE={}\nARGS_CONTENT_BEGIN\n{}\nARGS_CONTENT_END\nLIB_CHECKS_BEGIN\n{}\nLIB_CHECKS_END\n",
         java_path.to_string_lossy(),
@@ -711,12 +770,14 @@ pub fn build_forge_command(
         final_mp_dbg,
         cp_str,
         jvm_flags.join(" "),
-        args_file_path.to_string_lossy(),
+        temp_args_file_path.to_string_lossy(),
         args_content,
         lib_checks.join("\n"),
     );
     let _ = fs::write(logs_dir.join("launch-debug.txt"), debug_content);
-    cmd.arg(format!("@{}", args_file_path.to_string_lossy()));
+    let _ = fs::write(&args_file_path, args_content.clone());
+    let _ = fs::write(&temp_args_file_path, args_content_for_java);
+    cmd.arg(format!("@{}", temp_args_file_path.to_string_lossy()));
     cmd.current_dir(instance_minecraft_dir);
     Ok(cmd)
 }

@@ -164,6 +164,16 @@ fn get_current_timestamp() -> String {
 }
 
 #[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
+fn get_app_path() -> Result<String, String> {
+    Ok(get_instances_dir())
+}
+
+#[tauri::command]
 fn get_system_ram() -> Result<u64, String> {
     use sysinfo::{System, SystemExt};
     let mut sys = System::new_all();
@@ -575,8 +585,10 @@ async fn prepare_instance(app: tauri::AppHandle, instance_id: String, state: Sta
 #[tauri::command]
 fn check_instance_ready(instance_id: String) -> Result<bool, String> {
     let instances = load_instances();
-    let instance = instances.iter().find(|i| i.id == instance_id)
-        .ok_or("Instance not found")?;
+    let instance = match instances.iter().find(|i| i.id == instance_id) {
+        Some(i) => i,
+        None => return Ok(false), // Si no existe localmente, NO está lista
+    };
     
     let instance_path = std::path::PathBuf::from(&instance.path);
     if !instance_path.exists() {
@@ -692,6 +704,8 @@ pub fn run() {
             prepare_instance,
             check_instance_ready,
             get_system_ram,
+            get_app_path,
+            exit_app,
             get_mc_versions,
             get_loader_recommendation,
             get_java_info,

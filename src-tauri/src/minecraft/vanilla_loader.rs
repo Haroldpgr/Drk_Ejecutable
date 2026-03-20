@@ -7,7 +7,7 @@ use crate::auth::MinecraftProfile;
 use super::models::{VersionManifest, VersionInfo, AssetIndex};
 use super::downloader::download_file;
 use super::java::{get_java_path_for_major, get_required_java_version, download_java};
-use super::utils::{check_rules};
+use super::utils::check_rules;
 use super::launch_logic::{resolve_complete_version_info};
 
 fn emit(app: &Option<AppHandle>, instance_id: &str, stage: &str, percent: u8, message: &str) {
@@ -76,12 +76,20 @@ pub fn build_vanilla_command(
     instance_minecraft_dir: &Path,
     info: &VersionInfo,
     auth: &MinecraftProfile,
-    ram_mb: u64
+    ram_mb: u64,
+    width: Option<u32>,
+    height: Option<u32>
 ) -> Result<Command, String> {
     let assets_dir = base_path.join("assets");
     let libraries_dir = base_path.join("libraries");
     let versions_dir = base_path.join("versions");
-    let required_java = info.java_version.as_ref().map(|v| v.major_version).unwrap_or_else(|| get_required_java_version(&info.id));
+    
+    let required_java = if let Some(jv) = &info.java_version {
+        jv.major_version
+    } else {
+        get_required_java_version(&info.id)
+    };
+    
     let java_path = match get_java_path_for_major(required_java) {
         Ok(p) => p,
         Err(_) => {
@@ -89,30 +97,34 @@ pub fn build_vanilla_command(
             PathBuf::from(path_str)
         }
     };
+    
     let mut jars: Vec<PathBuf> = Vec::new();
-    if let Ok(content) = fs::read_to_string(versions_dir.join(&info.id).join("version.json")) {
-        if let Ok(meta) = serde_json::from_str::<VersionInfo>(&content) {
-            for lib in meta.libraries {
-                if !check_rules(&lib.rules) { continue; }
-                if let Some(downloads) = &lib.downloads {
-                    if let Some(artifact) = &downloads.artifact {
-                        if let Some(path_str) = &artifact.path {
-                            let p = libraries_dir.join(path_str);
-                            if p.exists() { jars.push(p); }
-                        }
-                    }
+    for lib in &info.libraries {
+        if !check_rules(&lib.rules) { continue; }
+        if let Some(downloads) = &lib.downloads {
+            if let Some(artifact) = &downloads.artifact {
+                if let Some(path_str) = &artifact.path {
+                    let p = libraries_dir.join(path_str);
+                    if p.exists() { jars.push(p); }
                 }
             }
         }
     }
-    let client_path = instance_minecraft_dir.join("client.jar");
+    
+    let client_path = versions_dir.join(&info.id).join(format!("{}.jar", &info.id));
     if client_path.exists() {
-        jars.insert(0, client_path);
+        jars.push(client_path);
     } else {
-        return Err("client.jar missing in instance".to_string());
+        // Fallback for newer versions where it might be in the instance dir
+        let instance_client = instance_minecraft_dir.join("client.jar");
+        if instance_client.exists() {
+            jars.push(instance_client);
+        }
     }
+    
     let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
     let classpath = jars.into_iter().map(|p| p.to_string_lossy().to_string()).collect::<Vec<_>>().join(sep);
+    
     let mut cmd = Command::new(java_path);
     let min_mem = std::cmp::max(512, ram_mb / 4);
     cmd.arg(format!("-Xms{}M", min_mem));
@@ -144,17 +156,36 @@ pub fn build_vanilla_command(
     cmd.arg("-cp").arg(classpath);
     cmd.arg(format!("-Dorg.lwjgl.librarypath={}", instance_minecraft_dir.join("natives").to_string_lossy()));
     cmd.arg(format!("-Djava.library.path={}", instance_minecraft_dir.join("natives").to_string_lossy()));
+    
+    if required_java >= 16 {
+        cmd.arg("--add-opens"); cmd.arg("java.base/java.util=ALL-UNNAMED");
+        cmd.arg("--add-opens"); cmd.arg("java.base/java.lang=ALL-UNNAMED");
+        cmd.arg("--add-opens"); cmd.arg("java.base/java.lang.reflect=ALL-UNNAMED");
+        cmd.arg("--add-opens"); cmd.arg("java.base/java.lang.invoke=ALL-UNNAMED");
+        cmd.arg("--add-opens"); cmd.arg("java.base/java.text=ALL-UNNAMED");
+        cmd.arg("--add-opens"); cmd.arg("java.desktop/java.awt.font=ALL-UNNAMED");
+        cmd.arg("--add-opens"); cmd.arg("java.base/java.nio=ALL-UNNAMED");
+        cmd.arg("--add-opens"); cmd.arg("java.base/sun.nio.ch=ALL-UNNAMED");
+        cmd.arg("--add-opens"); cmd.arg("java.base/java.util.jar=ALL-UNNAMED");
+        cmd.arg("--add-exports"); cmd.arg("java.base/sun.security.util=ALL-UNNAMED");
+        cmd.arg("--add-exports"); cmd.arg("jdk.naming.dns/com.sun.jndi.dns=java.naming");
+    }
+    
     cmd.arg(&info.main_class);
-    let asset_index_id = info.asset_index.as_ref().map(|a| a.id.as_str()).unwrap_or("legacy").to_string();
+    let asset_index_id = info.asset_index.as_ref().map(|a| a.id.as_str()).unwrap_or("legacy");
     cmd.arg("--version").arg(&info.id);
     cmd.arg("--gameDir").arg(instance_minecraft_dir);
     cmd.arg("--assetsDir").arg(assets_dir);
     cmd.arg("--assetIndex").arg(asset_index_id);
+    cmd.arg("--username").arg(&auth.name);
     cmd.arg("--uuid").arg(&auth.id);
     cmd.arg("--accessToken").arg(&auth.access_token);
     cmd.arg("--userType").arg("mojang");
     cmd.arg("--versionType").arg("launcher");
-    cmd.arg("--width").arg("854");
-    cmd.arg("--height").arg("480");
+    
+    // Resolución dinámica
+    cmd.arg("--width").arg(width.unwrap_or(854).to_string());
+    cmd.arg("--height").arg(height.unwrap_or(480).to_string());
+    
     Ok(cmd)
 }

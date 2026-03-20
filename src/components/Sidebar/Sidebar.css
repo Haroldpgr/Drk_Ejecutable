@@ -221,9 +221,9 @@
   width: 42px;
   height: 42px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #a0a0a0;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #d1d5db;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -279,43 +279,37 @@
   width: 42px;
   height: 42px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
+  background: #0f0f19;
   border: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   transition: all 0.2s;
-}
-
-.sidebar-user-avatar:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-  transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 
-.sidebar-user-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  position: relative;
-  z-index: 2;
+.sidebar-user-avatar:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: #6366f1;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.3);
 }
 
-.sidebar-user-fallback-icon {
-  position: absolute;
-  z-index: 1;
-  color: #a0a0a0;
+.sidebar-3d-skin {
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  height: 100%;
 }
 
-.sidebar-user-avatar:hover .sidebar-user-fallback-icon {
-  color: white;
+.sidebar-3d-skin canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain;
+  position: relative;
+  z-index: 5;
 }
 
 .sidebar-user-menu {

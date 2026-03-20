@@ -212,6 +212,8 @@ pub fn prepare_and_launch(
     let versions_dir = base_path.join("versions");
     let natives_dir = instance_path.join("natives");
     let minecraft_dir = instance_path.join("minecraft");
+    let _ = fs::create_dir_all(&minecraft_dir);
+    ensure_minecraft_lang_es_mx(&minecraft_dir);
 
     // 1. Fetch Manifest
     emit(&app, instance_id, "iniciando", 0, "Iniciando lanzamiento");
@@ -248,17 +250,17 @@ pub fn prepare_and_launch(
     emit(&app, instance_id, "version", 20, "Versión resuelta");
     if loader.as_deref().map(|l| l == "vanilla").unwrap_or(true) {
         let info = super::vanilla_loader::download_vanilla(base_path, &minecraft_dir, version_id, &app, instance_id)?;
-        let cmd = super::vanilla_loader::build_vanilla_command(base_path, &minecraft_dir, &info, auth, ram_mb)?;
+        let cmd = super::vanilla_loader::build_vanilla_command(base_path, &minecraft_dir, &info, auth, ram_mb, width, height)?;
         return Ok(cmd);
     }
     if matches!(loader.as_deref(), Some("fabric")) {
         let info = super::fabric_loader::download_fabric(base_path, &minecraft_dir, version_id, &app, instance_id)?;
-        let cmd = super::fabric_loader::build_fabric_command(base_path, &minecraft_dir, &info, auth, ram_mb)?;
+        let cmd = super::fabric_loader::build_fabric_command(base_path, &minecraft_dir, &info, auth, ram_mb, width, height)?;
         return Ok(cmd);
     }
     if matches!(loader.as_deref(), Some("forge")) {
         let info = super::forge_loader::download_forge(base_path, &minecraft_dir, version_id, &app, instance_id)?;
-        let cmd = super::forge_loader::build_forge_command(base_path, &minecraft_dir, &info, auth, ram_mb)?;
+        let cmd = super::forge_loader::build_forge_command(base_path, &minecraft_dir, &info, auth, ram_mb, width, height)?;
         return Ok(cmd);
     }
 
@@ -323,7 +325,10 @@ pub fn prepare_and_launch(
     }
     emit(&app, instance_id, "assets", 75, "Assets descargados");
 
-    // 6. Mods Management (download/extract)
+    // 6. Preparar Skin (Resource Pack Dinámico para Single Player)
+    prepare_skin_resourcepack(&minecraft_dir, auth, &app);
+
+    // 7. Mods Management (download/extract)
     let mods_dir = minecraft_dir.join("mods");
     let _ = fs::create_dir_all(&mods_dir);
 
@@ -1767,10 +1772,140 @@ fn maven_path(maven: &MavenName) -> Option<String> {
     ))
 }
 
+fn ensure_minecraft_lang_es_mx(minecraft_dir: &Path) {
+    let options_path = minecraft_dir.join("options.txt");
+    let content = if options_path.exists() {
+        fs::read_to_string(&options_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let mut found = false;
+    let mut out = String::new();
+    for line in content.lines() {
+        if line.starts_with("lang:") {
+            out.push_str("lang:es_mx\n");
+            found = true;
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if !found {
+        out.push_str("lang:es_mx\n");
+    }
+    let _ = fs::write(options_path, out);
+}
+
 fn ensure_trailing_slash(value: &str) -> String {
     if value.ends_with('/') {
         value.to_string()
     } else {
         format!("{}/", value)
+    }
+}
+
+pub fn prepare_skin_resourcepack(minecraft_dir: &Path, auth: &crate::auth::MinecraftProfile, app: &Option<AppHandle>) {
+    // Si la skin es la de steve por defecto o no hay, no hacemos nada especial
+    if auth.access_token == "offline" && auth.id.is_empty() {
+        return;
+    }
+
+    emit(app, "global", "skin", 96, "Sincronizando skin para el juego...");
+
+    let rp_dir = minecraft_dir.join("resourcepacks").join("DRK_Skin");
+    let textures_dir = rp_dir.join("assets").join("minecraft").join("textures").join("entity");
+    
+    if let Err(e) = fs::create_dir_all(&textures_dir) {
+        eprintln!("Error creando directorios de skin: {}", e);
+        return;
+    }
+
+    // 1. pack.mcmeta
+    let pack_mcmeta = r#"{
+  "pack": {
+    "pack_format": 15,
+    "description": "DRK Launcher Skin System"
+  }
+}"#;
+    let _ = fs::write(rp_dir.join("pack.mcmeta"), pack_mcmeta);
+
+    // 2. Descargar skin
+     // Priorizamos la URL del perfil (Supabase/PC/Link) si existe
+     let mut skin_url = if let Some(url) = &auth.avatar_url {
+         if url.starts_with("data:image") {
+             // Si es Base64 (upload local), guardarla directamente
+             let base64_data = url.split(',').nth(1).unwrap_or(url);
+             use base64::{Engine as _, engine::general_purpose};
+             if let Ok(bytes) = general_purpose::STANDARD.decode(base64_data) {
+                 let _ = fs::write(textures_dir.join("steve.png"), &bytes);
+                 let _ = fs::write(textures_dir.join("alex.png"), &bytes);
+                 return; // Ya terminamos
+             }
+             format!("https://mc-heads.net/skin/{}", auth.name)
+         } else if url.contains("mineskin.org/render") || url.contains("mc-heads.net/avatar") || url.contains("mc-heads.net/body") {
+             // Si la URL guardada es un render (3D o cara), forzar la descarga de la skin original
+             format!("https://mc-heads.net/skin/{}", auth.name)
+         } else {
+             url.clone()
+         }
+     } else {
+         format!("https://mc-heads.net/skin/{}", auth.name)
+     };
+
+     // Fallback final: si por alguna razón la URL está vacía
+     if skin_url.is_empty() {
+         skin_url = format!("https://mc-heads.net/skin/{}", auth.name);
+     }
+     
+     let steve_path = textures_dir.join("steve.png");
+     let alex_path = textures_dir.join("alex.png");
+
+     println!("Descargando skin desde: {}", skin_url);
+
+     if let Ok(response) = reqwest::blocking::get(&skin_url) {
+         if let Ok(bytes) = response.bytes() {
+             // Verificar que sea una imagen válida (mínimo unos bytes)
+             if bytes.len() > 100 {
+                 let _ = fs::write(&steve_path, &bytes);
+                 let _ = fs::write(&alex_path, &bytes);
+                 println!("Skin guardada correctamente en el Resource Pack");
+             } else {
+                 println!("La respuesta de la skin fue demasiado corta, usando fallback de Steve");
+                 // Fallback local si la descarga falla
+                 let _ = fs::copy(textures_dir.join("steve.png"), &steve_path);
+             }
+         }
+     }
+
+    // 3. Activar Resource Pack en options.txt
+    let options_path = minecraft_dir.join("options.txt");
+    println!("Configurando options.txt en: {:?}", options_path);
+    
+    let mut options_content = if options_path.exists() {
+        fs::read_to_string(&options_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    if !options_content.contains("DRK_Skin") {
+        if options_content.contains("resourcePacks:") {
+            // Reemplazar la línea existente
+            options_content = options_content.lines().map(|line| {
+                if line.starts_with("resourcePacks:") {
+                    if line == "resourcePacks:[]" {
+                        "resourcePacks:[\"file/DRK_Skin\"]".to_string()
+                    } else {
+                        line.replace("[", "[\"file/DRK_Skin\",")
+                    }
+                } else {
+                    line.to_string()
+                }
+            }).collect::<Vec<_>>().join("\n");
+        } else {
+            options_content.push_str("\nresourcePacks:[\"file/DRK_Skin\"]\n");
+        }
+        let _ = fs::write(&options_path, options_content);
+        println!("DRK_Skin añadido a options.txt");
     }
 }

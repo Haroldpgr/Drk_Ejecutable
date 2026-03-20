@@ -68,6 +68,7 @@ interface HomeProps {
   instances: Instance[];
   onDownloadInstance: (instance: Instance) => Promise<boolean> | boolean | void;
   onExecuteInstance: (instance: Instance) => void;
+  showToast?: (message: string, type: "success" | "error" | "info" | "warning") => void;
   onHome?: () => void;
 }
 
@@ -84,6 +85,7 @@ export default function Home({
   instances,
   onDownloadInstance,
   onExecuteInstance,
+  showToast,
 }: HomeProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isDownloaded, setIsDownloaded] = useState(false);
@@ -164,7 +166,7 @@ export default function Home({
       await onDownloadInstance(selectedInstance);
     } catch (error) {
       console.error("Error verifying files:", error);
-      alert("Error al verificar archivos");
+      if (showToast) showToast("Error al verificar archivos", "error");
     }
   }
   
@@ -177,7 +179,7 @@ export default function Home({
       await invoke("open_folder", { path: logsPath });
     } catch (error) {
       console.error("Error abriendo carpeta de logs:", error);
-      alert("No se pudo abrir la carpeta de logs");
+      if (showToast) showToast("No se pudo abrir la carpeta de logs", "error");
     }
   }
   
@@ -187,7 +189,7 @@ export default function Home({
     return (
       <div className="home-container">
         <div className="home-content">
-          <div className="home-welcome-screen">
+          <div className="home-welcome-screen glass-panel">
             <div className="home-welcome-logo-container">
               <div className="home-welcome-logo-glow"></div>
               <div className="home-welcome-logo">
@@ -318,44 +320,45 @@ export default function Home({
               )}
               
               <div className="home-instance-play-group">
-                <button
-                  onClick={() => onExecuteInstance(selectedInstance)}
-                  disabled={isLaunchingActive || isDownloadingActive || Boolean(launchingInstanceId) || isCheckingThis}
-                  className="home-instance-play-button"
-                  title={!isDownloaded ? "Debes descargar la instancia primero" : "Jugar"}
-                >
-                  {isLaunchingActive || isDownloadingActive || isCheckingThis ? (
-                    <>
-                      <div className="home-spinner"></div>
-                      <span>
-                        {isCheckingThis ? "Comprobando" : isDownloadingActive ? "Verificando" : activeProgress?.stage === "iniciado" ? "Jugando" : "Lanzando"}
-                        {activeProgress?.percent !== undefined && activeProgress?.stage !== "iniciado" && !isCheckingThis ? ` ${activeProgress.percent}%` : ""}
-                        {progressLabel && activeProgress?.stage !== "iniciado" && !isCheckingThis ? ` · ${progressLabel}` : ""}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <Play size={24} />
-                      <span>Jugar</span>
-                    </>
-                  )}
-                </button>
-
-                {!isDownloaded && (
+                {!isDownloaded ? (
                   <button
                     onClick={() => onDownloadInstance(selectedInstance)}
-                    disabled={isVerifying || isDownloadingActive || isBlocked}
-                    className="home-instance-download-button"
+                    disabled={isDownloadingActive || isBlocked || isCheckingThis}
+                    className="home-instance-play-button"
                   >
-                    {isDownloadingActive ? (
+                    {isDownloadingActive || isCheckingThis ? (
                       <>
                         <div className="home-spinner"></div>
-                        <span>Descargando...</span>
+                        <span>
+                          {isCheckingThis ? "Comprobando" : "Descargando"}
+                          {activeProgress?.percent !== undefined && !isCheckingThis ? ` ${activeProgress.percent}%` : ""}
+                        </span>
                       </>
                     ) : (
                       <>
                         <Download size={24} />
                         <span>Descargar</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => onExecuteInstance(selectedInstance)}
+                    disabled={isLaunchingActive || isDownloadingActive || Boolean(launchingInstanceId) || isCheckingThis}
+                    className="home-instance-play-button"
+                  >
+                    {isLaunchingActive || isDownloadingActive || isCheckingThis ? (
+                      <>
+                        <div className="home-spinner"></div>
+                        <span>
+                          {isCheckingThis ? "Comprobando" : isDownloadingActive ? "Verificando" : activeProgress?.stage === "iniciado" ? "Jugando" : "Lanzando"}
+                          {activeProgress?.percent !== undefined && activeProgress?.stage !== "iniciado" && !isCheckingThis ? ` ${activeProgress.percent}%` : ""}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Play size={24} />
+                        <span>Jugar</span>
                       </>
                     )}
                   </button>
@@ -419,56 +422,59 @@ export default function Home({
               <div className="home-news-section">
                 {/* Left Card */}
                 <div className="home-news-card">
-                  <div className="home-news-card-image">
+                  <div className="home-news-image">
                     {selectedInstance.newsLeft?.image ? (
                       <img src={selectedInstance.newsLeft.image} alt="Noticia" />
                     ) : (
                       <div className="home-news-card-placeholder">📰</div>
                     )}
                   </div>
-                  <div className="home-news-card-content">
-                    <h4>{selectedInstance.newsLeft?.title || "Noticia"}</h4>
-                    <p>{selectedInstance.newsLeft?.content || "Información y noticias del servidor."}</p>
+                  <div className="home-news-content">
+                    <h4 className="home-news-title">{selectedInstance.newsLeft?.title || "Noticia"}</h4>
+                    <p className="home-news-description">{selectedInstance.newsLeft?.content || "Información y noticias del servidor."}</p>
                   </div>
                 </div>
 
                 {/* Center Card */}
                 <div className="home-news-card">
-                  <div className="home-news-card-image">
+                  <div className="home-news-image">
                     {selectedInstance.newsCenter?.image ? (
                       <img src={selectedInstance.newsCenter.image} alt="Noticia" />
                     ) : (
                       <div className="home-news-card-placeholder">📰</div>
                     )}
                   </div>
-                  <div className="home-news-card-content">
-                    <h4>{selectedInstance.newsCenter?.title || "Noticia Central"}</h4>
-                    <p>{selectedInstance.newsCenter?.content || "Información importante."}</p>
+                  <div className="home-news-content">
+                    <h4 className="home-news-title">{selectedInstance.newsCenter?.title || "Noticia Central"}</h4>
+                    <p className="home-news-description">{selectedInstance.newsCenter?.content || "Información importante."}</p>
                   </div>
                 </div>
 
                 {/* Right Card */}
                 <div className="home-news-card">
-                  <div className="home-news-card-image">
+                  <div className="home-news-image">
                     {selectedInstance.newsRight?.image ? (
                       <img src={selectedInstance.newsRight.image} alt="Noticia" />
                     ) : (
                       <div className="home-news-card-placeholder">📰</div>
                     )}
                   </div>
-                  <div className="home-news-card-content">
-                    <h4>{selectedInstance.newsRight?.title || "Noticia"}</h4>
-                    <p>{selectedInstance.newsRight?.content || "Más información."}</p>
+                  <div className="home-news-content">
+                    <h4 className="home-news-title">{selectedInstance.newsRight?.title || "Noticia"}</h4>
+                    <p className="home-news-description">{selectedInstance.newsRight?.content || "Más información."}</p>
                   </div>
                 </div>
               </div>
 
               {/* 2. Server Info Section */}
               <div className="home-info-section home-server-info-section">
-                <h3 className="home-section-title">INFORMACIÓN IMPORTANTE DEL SERVIDOR</h3>
+                <h3 className="home-info-title">
+                  <Eye size={20} />
+                  INFORMACIÓN DEL SERVIDOR
+                </h3>
                 <div className="home-info-grid">
                   <div className="home-info-item">
-                    <span className="home-info-label">Jugadores en línea:</span>
+                    <span className="home-info-label">Jugadores:</span>
                     <span className="home-info-value">{selectedInstance.statsCard?.playersOnline !== undefined ? selectedInstance.statsCard.playersOnline : "N/A"}</span>
                   </div>
                   <div className="home-info-item">
@@ -488,7 +494,10 @@ export default function Home({
 
               {/* 3. Basic Info Section */}
               <div className="home-info-section home-basic-info-section">
-                <h3 className="home-section-title">INFORMACIÓN BÁSICA DE LA INSTANCIA</h3>
+                <h3 className="home-info-title">
+                  <Settings size={20} />
+                  DATOS DE LA INSTANCIA
+                </h3>
                 <div className="home-info-grid">
                   <div className="home-info-item">
                     <span className="home-info-label">Versión:</span>
