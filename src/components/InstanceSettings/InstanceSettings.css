@@ -248,3 +248,86 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+.settings-mods-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.settings-mods-meta {
+  color: rgba(255, 255, 255, 0.65);
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+
+.settings-mods-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
+.settings-mods-refresh:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.settings-mods-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-mods-empty {
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 0.25rem 0;
+}
+
+.settings-mod-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.settings-mod-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.settings-mod-row.disabled {
+  opacity: 0.65;
+}
+
+.settings-mod-name {
+  font-weight: 800;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-mod-state {
+  display: inline-flex;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.75);
+}

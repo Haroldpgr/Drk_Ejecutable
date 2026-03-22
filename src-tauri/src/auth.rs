@@ -8,6 +8,7 @@ use oauth2::{
 use oauth2::reqwest::async_http_client;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::time::{timeout, Duration};
 use reqwest::Client;
 
 #[derive(Default, Serialize, Clone, Debug)]
@@ -105,23 +106,48 @@ pub async fn start_microsoft_login(state: State<'_, AppState>) -> Result<String,
     let listener = TcpListener::bind("127.0.0.1:3434").await.map_err(|e| e.to_string())?;
 
     // Accept one connection
-    let (mut stream, _) = listener.accept().await.map_err(|e| e.to_string())?;
+    let (mut stream, _) = timeout(Duration::from_secs(180), listener.accept())
+        .await
+        .map_err(|_| "Timeout esperando el callback de Microsoft".to_string())?
+        .map_err(|e| e.to_string())?;
 
     let mut buffer = [0; 1024];
-    let n = stream.read(&mut buffer).await.map_err(|e| e.to_string())?;
+    let n = timeout(Duration::from_secs(10), stream.read(&mut buffer))
+        .await
+        .map_err(|_| "Timeout leyendo el callback".to_string())?
+        .map_err(|e| e.to_string())?;
     let request = String::from_utf8_lossy(&buffer[..n]);
 
-    // Parse code from request
-    // GET /auth/callback?code=M... HTTP/1.1
-    let code = if let Some(start) = request.find("code=") {
-        let rest = &request[start + 5..];
-        let end = rest.find('&').or_else(|| rest.find(' ')).unwrap_or(rest.len());
-        &rest[..end]
-    } else {
-        return Err("No code found in callback".to_string());
-    };
+    let first_line = request.lines().next().unwrap_or("");
+    let path = first_line.split_whitespace().nth(1).unwrap_or("");
+    let query = path.splitn(2, '?').nth(1).unwrap_or("");
+    let mut code_param: Option<String> = None;
+    let mut state_param: Option<String> = None;
+    for part in query.split('&') {
+        let mut kv = part.splitn(2, '=');
+        let k = kv.next().unwrap_or("");
+        let v = kv.next().unwrap_or("");
+        if k == "code" {
+            code_param = Some(v.to_string());
+        } else if k == "state" {
+            state_param = Some(v.to_string());
+        }
+    }
 
-    let code = AuthorizationCode::new(code.to_string());
+    let code_value = code_param.ok_or("No code found in callback".to_string())?;
+    let state_received = state_param.ok_or("No state found in callback".to_string())?;
+
+    let csrf_expected = {
+        let mut auth_state = state.auth.lock().map_err(|_| "Failed to lock auth state".to_string())?;
+        auth_state.csrf_token.take().ok_or("No CSRF token found")?.secret().to_string()
+    };
+    if state_received != csrf_expected {
+        return Err("Callback inválido (state no coincide)".to_string());
+    }
+
+    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\nPuedes cerrar esta ventana.").await;
+
+    let code = AuthorizationCode::new(code_value.to_string());
 
     // Exchange code for token
     let pkce_verifier = {

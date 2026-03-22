@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Login from "./pages/Login/Login";
@@ -12,10 +12,15 @@ import CrashModal from "./components/CrashModal/CrashModal";
 import Toast, { ToastType } from "./components/Toast/Toast";
 import "./components/Toast/Toast.css";
 import InstanceSettings from "./components/InstanceSettings/InstanceSettings";
+import LogViewer from "./components/LogViewer/LogViewer";
+import UpdateModal, { LauncherRelease } from "./components/UpdateModal/UpdateModal";
 import Profile from "./pages/Profile/Profile";
 import Settings from "./pages/Settings/Settings";
 import AdminDashboard from "./pages/AdminDashboard/AdminDashboard";
 import { supabase } from "./supabase";
+import { useGameLogs } from "./hooks/useGameLogs";
+import { compareSemver } from "./utils/semver";
+import { getVersion } from "@tauri-apps/api/app";
 import "./App.css";
 
 interface Instance {
@@ -163,6 +168,65 @@ function App() {
     error: "",
     code: 0,
   });
+  const gameLogs = useGameLogs();
+
+  const [launcherVersion, setLauncherVersion] = useState("0.0.0");
+  const launcherVersionRef = useRef("0.0.0");
+  const [updateModal, setUpdateModal] = useState<{ isOpen: boolean; release: LauncherRelease | null }>({
+    isOpen: false,
+    release: null,
+  });
+
+  const dismissKey = "drk_launcher_update_dismissed";
+
+  const showUpdateIfNeeded = (release: LauncherRelease, force = false) => {
+    if (!release?.version) return;
+    if (compareSemver(release.version, launcherVersionRef.current) <= 0) return;
+    const notificationsEnabled = localStorage.getItem("drk_settings_notifications") !== "false";
+    if (!force && !release.mandatory && !notificationsEnabled) return;
+    const dismissed = localStorage.getItem(dismissKey) || "";
+    if (!force && !release.mandatory && dismissed === release.version) return;
+    setUpdateModal({ isOpen: true, release });
+  };
+
+  const checkForUpdates = async (force = false) => {
+    try {
+      const { data, error } = await supabase
+        .from("launcher_releases")
+        .select("version,title,notes,url,created_at,mandatory")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) return;
+      showUpdateIfNeeded(data as unknown as LauncherRelease, force);
+    } catch {}
+  };
+
+  useEffect(() => {
+    getVersion()
+      .then((v) => {
+        if (!v) return;
+        setLauncherVersion(v);
+        launcherVersionRef.current = v;
+      })
+      .catch(() => {});
+    checkForUpdates(false);
+    const channel = supabase
+      .channel("launcher-releases-watch")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "launcher_releases" },
+        (payload: any) => {
+          const next = payload?.new as LauncherRelease | undefined;
+          if (next?.version) showUpdateIfNeeded(next, false);
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     // Verificar sesión guardada
@@ -192,6 +256,8 @@ function App() {
       loadInstances();
     }
   }, []);
+
+  
 
   // Bloquear menú contextual (click derecho) globalmente si no es admin
   useEffect(() => {
@@ -425,12 +491,13 @@ function App() {
     setLastLaunchDurationMs(null);
     setIsLaunching(true);
     setLaunchingInstanceId(instance.id);
+    gameLogs.open({ id: instance.id, name: instance.name }, 200);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const authData = {
         id: user?.id || "offline-id",
         name: username,
-        access_token: "offline-token",
+        access_token: isOfflineMode ? "offline" : "offline-token",
       };
 
       if (unlistenProgress) {
@@ -557,6 +624,10 @@ function App() {
       setIsLaunching(false);
       setLaunchingInstanceId(null);
     } finally {}
+  }
+
+  async function handleOpenLogs(instance: Instance) {
+    gameLogs.open({ id: instance.id, name: instance.name }, 400);
   }
 
   async function handleCreateInstance(instanceData: InstanceData) {
@@ -725,7 +796,7 @@ function App() {
     }
   }
 
-  async function handleDownloadInstance(instance: Instance, isPlayFlow = false) {
+  async function handleDownloadInstance(instance: Instance, isPlayFlow = false, mode: "prepare" | "repair" = "prepare") {
     try {
       if (launchingInstanceId && launchingInstanceId !== instance.id) {
         return false;
@@ -773,10 +844,14 @@ function App() {
         });
         setUnlistenProgress(() => unlisten);
         try {
-          await invoke("prepare_instance", { instanceId: instance.id });
+          if (mode === "repair") {
+            await invoke("repair_instance", { instanceId: instance.id });
+          } else {
+            await invoke("prepare_instance", { instanceId: instance.id });
+          }
         } catch (error) {
           console.error("Error downloading instance:", error);
-          showToast("Error al preparar la descarga", "error");
+          showToast(mode === "repair" ? "Error al reparar la instancia" : "Error al preparar la descarga", "error");
           try { (unlisten as any)(); } catch {}
           if (isPlayFlow) {
             setPlayFlowInstanceId(null);
@@ -952,7 +1027,9 @@ function App() {
                   onSettings={handleSettings}
                   instances={instances}
                   onDownloadInstance={handleDownloadInstance}
+                  onRepairInstance={(instance) => handleDownloadInstance(instance, false, "repair")}
                   onExecuteInstance={handleExecuteInstance}
+                  onOpenLogs={handleOpenLogs}
                   onHome={() => setSelectedInstance(null)}
                   showToast={showToast}
                 />
@@ -963,7 +1040,13 @@ function App() {
                   onUpdateUser={handleUpdateUser} 
                 />
               )}
-              {currentView === "settings" && <Settings showToast={showToast} />}
+              {currentView === "settings" && (
+                <Settings
+                  showToast={showToast}
+                  launcherVersion={`v${launcherVersion}`}
+                  onCheckUpdates={() => checkForUpdates(true)}
+                />
+              )}
               {currentView === "admin-dashboard" && (
                 <AdminDashboard 
                   onBack={() => setCurrentView("home")} 
@@ -1001,13 +1084,38 @@ function App() {
         error={crashData.error}
         code={crashData.code}
       />
+      <LogViewer
+        isOpen={gameLogs.isOpen}
+        instanceName={gameLogs.instanceName}
+        stdoutText={gameLogs.stdoutText}
+        stderrText={gameLogs.stderrText}
+        onClose={gameLogs.close}
+        onClear={gameLogs.clearAndTruncateFiles}
+      />
+      <UpdateModal
+        isOpen={updateModal.isOpen}
+        currentVersion={launcherVersion}
+        release={updateModal.release}
+        onClose={() => setUpdateModal({ isOpen: false, release: null })}
+        onSkip={() => {
+          if (updateModal.release?.version) {
+            localStorage.setItem(dismissKey, updateModal.release.version);
+          }
+          setUpdateModal({ isOpen: false, release: null });
+        }}
+      />
       {settingsInstance && (
         <InstanceSettings
           instance={settingsInstance}
           isAdmin={isAdmin}
           onClose={() => setSettingsInstance(null)}
           onSave={handleSaveSettings}
-          onOpenFolder={(path) => invoke("open_folder", { path }).catch(() => showToast("No se pudo abrir la carpeta", "error"))}
+          onOpenInstanceFolder={(instanceId, kind) =>
+            invoke("open_instance_folder", { instanceId, kind }).catch((e) => {
+              const msg = typeof e === "string" ? e : "No se pudo abrir la carpeta";
+              showToast(msg, "error");
+            })
+          }
           onDelete={handleDeleteInstance}
         />
       )}

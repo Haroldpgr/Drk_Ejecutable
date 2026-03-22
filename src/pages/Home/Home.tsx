@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Play, Settings, Download, ChevronLeft, ChevronRight, CheckCircle2, Eye } from "lucide-react";
+import { Play, Settings, Download, ChevronLeft, ChevronRight, CheckCircle2, Eye, Wrench } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import "./Home.css";
 
@@ -67,7 +67,9 @@ interface HomeProps {
   onSettings: (instance: Instance) => void;
   instances: Instance[];
   onDownloadInstance: (instance: Instance) => Promise<boolean> | boolean | void;
+  onRepairInstance: (instance: Instance) => Promise<boolean> | boolean | void;
   onExecuteInstance: (instance: Instance) => void;
+  onOpenLogs: (instance: Instance) => void;
   showToast?: (message: string, type: "success" | "error" | "info" | "warning") => void;
   onHome?: () => void;
 }
@@ -84,12 +86,15 @@ export default function Home({
   onSettings,
   instances,
   onDownloadInstance,
+  onRepairInstance,
   onExecuteInstance,
+  onOpenLogs,
   showToast,
 }: HomeProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isDownloaded, setIsDownloaded] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isRepairing, setIsRepairing] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
   const [downloadedInstances, setDownloadedInstances] = useState<Record<string, boolean>>({});
 
@@ -170,17 +175,26 @@ export default function Home({
     }
   }
   
+  async function handleRepairFiles() {
+    if (!selectedInstance) {
+      return;
+    }
+    setIsRepairing(true);
+    try {
+      await onRepairInstance(selectedInstance);
+    } catch (error) {
+      console.error("Error repairing instance:", error);
+      if (showToast) showToast("Error al reparar la instancia", "error");
+    } finally {
+      setIsRepairing(false);
+    }
+  }
+
   async function handleOpenLogs() {
     if (!selectedInstance) {
       return;
     }
-    try {
-      const logsPath = `${selectedInstance.path}\\logs`;
-      await invoke("open_folder", { path: logsPath });
-    } catch (error) {
-      console.error("Error abriendo carpeta de logs:", error);
-      if (showToast) showToast("No se pudo abrir la carpeta de logs", "error");
-    }
+    onOpenLogs(selectedInstance);
   }
   
 
@@ -366,7 +380,7 @@ export default function Home({
 
                 <button
                   onClick={handleVerifyFiles}
-                  disabled={isVerifying || isDownloadingActive || isBlocked}
+                  disabled={isVerifying || isRepairing || isDownloadingActive || isBlocked}
                   className="home-instance-verify-button"
                   title="Verificar archivos y descargar lo que falte automáticamente"
                 >
@@ -379,6 +393,24 @@ export default function Home({
                     <>
                       <CheckCircle2 size={20} />
                       <span>Verificar</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={handleRepairFiles}
+                  disabled={isRepairing || isDownloadingActive || isLaunchingActive || isBlocked}
+                  className="home-instance-verify-button"
+                  title="Reparación completa: borra librerías/natives/client para re-descargar y solucionar errores"
+                >
+                  {isRepairing ? (
+                    <>
+                      <div className="home-spinner"></div>
+                      <span>Reparando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Wrench size={20} />
+                      <span>Reparar</span>
                     </>
                   )}
                 </button>

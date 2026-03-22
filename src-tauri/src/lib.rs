@@ -1,8 +1,9 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
@@ -11,7 +12,8 @@ mod minecraft;
 use auth::{AppState, AuthState};
 use tauri::State;
 use tauri::Emitter;
-use sha1::{Sha1, Digest};
+use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use rand_core::OsRng;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EventCard {
@@ -192,6 +194,121 @@ fn get_instances() -> Vec<Instance> {
     load_instances()
 }
 
+#[derive(Serialize)]
+struct ModEntry {
+    file_name: String,
+    enabled: bool,
+}
+
+#[tauri::command]
+fn get_instance_log_tail(instance_id: String, kind: String, max_lines: usize) -> Result<String, String> {
+    let instances = load_instances();
+    let instance = instances.iter().find(|i| i.id == instance_id)
+        .ok_or("Instance not found")?;
+    let instance_path = std::path::PathBuf::from(&instance.path);
+    let logs_dir = instance_path.join("logs");
+    let file_path = match kind.as_str() {
+        "stdout" => logs_dir.join("latest.log"),
+        "stderr" => logs_dir.join("latest_err.log"),
+        "launch" => logs_dir.join("launch-debug.txt"),
+        _ => return Err("Invalid kind".to_string())
+    };
+    if !file_path.exists() {
+        return Ok(String::new());
+    }
+    let mut file = fs::File::open(&file_path).map_err(|e| e.to_string())?;
+    let max_bytes: u64 = 256 * 1024;
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = if len > max_bytes { len - max_bytes } else { 0 };
+    file.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+    let content = String::from_utf8_lossy(&buf);
+    let mut lines: Vec<&str> = content.lines().collect();
+    if max_lines > 0 && lines.len() > max_lines {
+        lines = lines[lines.len() - max_lines..].to_vec();
+    }
+    Ok(lines.join("\n"))
+}
+
+#[tauri::command]
+fn clear_instance_logs(instance_id: String) -> Result<(), String> {
+    let instances = load_instances();
+    let instance = instances
+        .iter()
+        .find(|i| i.id == instance_id)
+        .ok_or("Instance not found")?;
+    let instance_path = std::path::PathBuf::from(&instance.path);
+    let logs_dir = instance_path.join("logs");
+    let files = [
+        logs_dir.join("latest.log"),
+        logs_dir.join("latest_err.log"),
+        logs_dir.join("launch-debug.txt"),
+    ];
+    for f in files {
+        if f.exists() {
+            let _ = fs::write(f, "");
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_instance_mods(instance_id: String) -> Result<Vec<ModEntry>, String> {
+    let instances = load_instances();
+    let instance = instances.iter().find(|i| i.id == instance_id)
+        .ok_or("Instance not found")?;
+    let instance_path = std::path::PathBuf::from(&instance.path);
+    let mods_dir = instance_path.join("minecraft").join("mods");
+    let mut result: Vec<ModEntry> = Vec::new();
+    if let Ok(entries) = fs::read_dir(&mods_dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if let Some(name) = p.file_name().and_then(|n| n.to_str()).map(|s| s.to_string()) {
+                let lower = name.to_lowercase();
+                if lower.ends_with(".jar") || lower.ends_with(".jar.disabled") {
+                    let enabled = lower.ends_with(".jar");
+                    result.push(ModEntry { file_name: name, enabled });
+                }
+            }
+        }
+    }
+    result.sort_by(|a, b| a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()));
+    Ok(result)
+}
+
+#[tauri::command]
+fn set_instance_mod_enabled(instance_id: String, file_name: String, enabled: bool) -> Result<(), String> {
+    let instances = load_instances();
+    let instance = instances.iter().find(|i| i.id == instance_id)
+        .ok_or("Instance not found")?;
+    let instance_path = std::path::PathBuf::from(&instance.path);
+    let mods_dir = instance_path.join("minecraft").join("mods");
+    let from_path = mods_dir.join(&file_name);
+    if !from_path.exists() {
+        return Err("Mod file not found".to_string());
+    }
+    let lower = file_name.to_lowercase();
+    let target_name = if enabled {
+        if lower.ends_with(".jar.disabled") {
+            file_name.trim_end_matches(".disabled").to_string()
+        } else {
+            file_name.clone()
+        }
+    } else {
+        if lower.ends_with(".jar") {
+            format!("{}.disabled", file_name)
+        } else {
+            file_name.clone()
+        }
+    };
+    let to_path = mods_dir.join(&target_name);
+    if from_path == to_path {
+        return Ok(());
+    }
+    fs::rename(&from_path, &to_path).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn save_instance(instance: Instance) -> Result<(), String> {
     let mut instances = load_instances();
@@ -323,8 +440,16 @@ fn save_instance(instance: Instance) -> Result<(), String> {
 fn open_folder(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        let p = path.trim();
+        if p.is_empty() {
+            return Err("Ruta vacía".to_string());
+        }
+        let normalized = p.replace('/', "\\");
+        if !Path::new(&normalized).exists() {
+            return Err(format!("Ruta no existe: {}", normalized));
+        }
         Command::new("explorer")
-            .arg(&path)
+            .arg(&normalized)
             .spawn()
             .map_err(|e| format!("Failed to open folder: {}", e))?;
     }
@@ -346,6 +471,28 @@ fn open_folder(path: String) -> Result<(), String> {
     }
     
     Ok(())
+}
+
+#[tauri::command]
+fn open_instance_folder(instance_id: String, kind: String) -> Result<(), String> {
+    let instances = load_instances();
+    let instance = instances
+        .iter()
+        .find(|i| i.id == instance_id)
+        .ok_or("Instance not found")?;
+    let root = std::path::PathBuf::from(&instance.path);
+    if instance.path.trim().is_empty() || !root.exists() {
+        return Err("Instancia no descargada (sin carpeta local)".to_string());
+    }
+    let target = match kind.as_str() {
+        "root" => root,
+        "logs" => std::path::PathBuf::from(&instance.path).join("logs"),
+        "mods" => std::path::PathBuf::from(&instance.path).join("minecraft").join("mods"),
+        "minecraft" => std::path::PathBuf::from(&instance.path).join("minecraft"),
+        _ => return Err("Invalid kind".to_string()),
+    };
+    let _ = fs::create_dir_all(&target);
+    open_folder(target.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -414,13 +561,15 @@ async fn launch_instance(app: tauri::AppHandle, instance_id: String, state: Stat
         false // force_update: false for normal launch
     ) {
             Ok(mut cmd) => {
-                // Redirect output to files
-                if let Ok(stdout_file) = std::fs::File::create(instance_path_clone.join("logs").join("latest.log")) {
-                     cmd.stdout(stdout_file);
-                }
-                if let Ok(stderr_file) = std::fs::File::create(instance_path_clone.join("logs").join("latest_err.log")) {
-                     cmd.stderr(stderr_file);
-                }
+                let logs_dir = instance_path_clone.join("logs");
+                let _ = fs::create_dir_all(&logs_dir);
+                let stdout_path = logs_dir.join("latest.log");
+                let stderr_path = logs_dir.join("latest_err.log");
+                let stdout_file = std::fs::File::create(&stdout_path).ok();
+                let stderr_file = std::fs::File::create(&stderr_path).ok();
+
+                cmd.stdout(Stdio::piped());
+                cmd.stderr(Stdio::piped());
                 
                 match cmd.spawn() {
                     Ok(mut child) => {
@@ -430,6 +579,46 @@ async fn launch_instance(app: tauri::AppHandle, instance_id: String, state: Stat
                             "percent": 100,
                             "message": "Juego iniciado"
                         }));
+
+                        if let Some(out) = child.stdout.take() {
+                            let app_log = app_clone.clone();
+                            let instance_id_log = instance_id.clone();
+                            let mut writer = stdout_file.map(std::io::BufWriter::new);
+                            std::thread::spawn(move || {
+                                let reader = BufReader::new(out);
+                                for line in reader.lines().flatten() {
+                                    let _ = app_log.emit("game_log", serde_json::json!({
+                                        "instanceId": instance_id_log,
+                                        "stream": "stdout",
+                                        "line": line
+                                    }));
+                                    if let Some(w) = writer.as_mut() {
+                                        let _ = writeln!(w, "{}", line);
+                                        let _ = w.flush();
+                                    }
+                                }
+                            });
+                        }
+
+                        if let Some(err) = child.stderr.take() {
+                            let app_log = app_clone.clone();
+                            let instance_id_log = instance_id.clone();
+                            let mut writer = stderr_file.map(std::io::BufWriter::new);
+                            std::thread::spawn(move || {
+                                let reader = BufReader::new(err);
+                                for line in reader.lines().flatten() {
+                                    let _ = app_log.emit("game_log", serde_json::json!({
+                                        "instanceId": instance_id_log,
+                                        "stream": "stderr",
+                                        "line": line
+                                    }));
+                                    if let Some(w) = writer.as_mut() {
+                                        let _ = writeln!(w, "{}", line);
+                                        let _ = w.flush();
+                                    }
+                                }
+                            });
+                        }
                         
                         // Monitor process execution
                         match child.wait() {
@@ -583,6 +772,95 @@ async fn prepare_instance(app: tauri::AppHandle, instance_id: String, state: Sta
 }
 
 #[tauri::command]
+async fn repair_instance(app: tauri::AppHandle, instance_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let instances = load_instances();
+    let instance = instances.iter().find(|i| i.id == instance_id)
+        .ok_or("Instance not found")?;
+    if instance.launcher.is_none() {
+        return Err("Launcher not configured".to_string());
+    }
+    let auth_profile = {
+        let auth_state = state.auth.lock().map_err(|_| "Failed to lock auth state")?;
+        auth_state.profile.clone().ok_or("Not logged in. Please login first.")?
+    };
+    let instance_path = std::path::PathBuf::from(&instance.path);
+    let app_data = get_instances_dir();
+    let root_path = std::path::PathBuf::from(app_data);
+    let ram = instance.ram.unwrap_or(4096);
+    let version = instance.version.clone();
+    let mods_urls = instance.mods.clone();
+    let modpack_url = instance.modpack_url.clone();
+    let loader = instance.modloader.clone();
+    let width = instance.resolution_width;
+    let height = instance.resolution_height;
+    let instance_path_clone = instance_path.clone();
+    let root_path_clone = root_path.clone();
+    let auth_profile_clone = auth_profile.clone();
+    let mods_urls_clone = mods_urls.clone();
+    let modpack_url_clone = modpack_url.clone();
+    let loader_clone = loader.clone();
+    let app_clone = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let _ = fs::create_dir_all(instance_path_clone.join("logs"));
+        let _ = app_clone.emit("launch_progress", serde_json::json!({
+            "instanceId": instance_id,
+            "stage": "reparando",
+            "percent": 0,
+            "message": "Reparando instancia..."
+        }));
+
+        let minecraft_dir = instance_path_clone.join("minecraft");
+        let _ = fs::remove_file(minecraft_dir.join("client.jar"));
+        let _ = fs::remove_dir_all(minecraft_dir.join("natives"));
+        let _ = fs::remove_file(minecraft_dir.join("modpack.zip"));
+        let _ = fs::remove_dir_all(instance_path_clone.join("libraries"));
+
+        let _ = fs::create_dir_all(minecraft_dir.join("mods"));
+        let _ = fs::create_dir_all(minecraft_dir.join("resourcepacks"));
+
+        match minecraft::launch_logic::prepare_and_launch(
+            &root_path_clone,
+            &instance_path_clone,
+            &version,
+            &auth_profile_clone,
+            ram,
+            mods_urls_clone,
+            modpack_url_clone,
+            loader_clone,
+            width,
+            height,
+            Some(app_clone.clone()),
+            &instance_id,
+            true
+        ) {
+            Ok(_) => {
+                let _ = app_clone.emit("launch_progress", serde_json::json!({
+                    "instanceId": instance_id,
+                    "stage": "descarga_completa",
+                    "percent": 100,
+                    "message": "Reparación completa"
+                }));
+                Ok(())
+            },
+            Err(e) => {
+                let _ = app_clone.emit("launch_progress", serde_json::json!({
+                    "instanceId": instance_id,
+                    "stage": "error",
+                    "percent": 100,
+                    "message": e
+                }));
+                Err(e)
+            }
+        }
+    }).await;
+
+    match result {
+        Ok(res) => res,
+        Err(e) => Err(format!("Task panicked: {}", e))
+    }
+}
+
+#[tauri::command]
 fn check_instance_ready(instance_id: String) -> Result<bool, String> {
     let instances = load_instances();
     let instance = match instances.iter().find(|i| i.id == instance_id) {
@@ -651,16 +929,14 @@ fn delete_instance(instance_id: String) -> Result<(), String> {
 fn check_admin_password(password: String) -> bool {
     let path = get_admin_path();
     if !Path::new(&path).exists() {
-        // Default password if not set: "DrkAdmin2026Secure!"
-        return password == "DrkAdmin2026Secure!";
+        return false;
     }
     if let Ok(content) = fs::read_to_string(&path) {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
             if let Some(hash) = json.get("hash").and_then(|h| h.as_str()) {
-                let mut hasher = Sha1::new();
-                hasher.update(password.as_bytes());
-                let result = hex::encode(hasher.finalize());
-                return result == hash;
+                if let Ok(parsed) = PasswordHash::new(hash) {
+                    return argon2::Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok();
+                }
             }
         }
     }
@@ -670,13 +946,12 @@ fn check_admin_password(password: String) -> bool {
 #[tauri::command]
 fn set_admin_password(password: String) -> Result<(), String> {
     let path = get_admin_path();
-    let mut hasher = Sha1::new();
-    hasher.update(password.as_bytes());
-    let result = hex::encode(hasher.finalize());
-    
-    let json = serde_json::json!({
-        "hash": result
-    });
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = argon2::Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map_err(|e| e.to_string())?
+        .to_string();
+    let json = serde_json::json!({ "hash": hash, "algo": "argon2id" });
     
     if let Some(p) = Path::new(&path).parent() {
         let _ = fs::create_dir_all(p);
@@ -702,9 +977,15 @@ pub fn run() {
             delete_instance,
             launch_instance,
             prepare_instance,
+            repair_instance,
             check_instance_ready,
             get_system_ram,
             get_app_path,
+            get_instance_log_tail,
+            clear_instance_logs,
+            get_instance_mods,
+            set_instance_mod_enabled,
+            open_instance_folder,
             exit_app,
             get_mc_versions,
             get_loader_recommendation,

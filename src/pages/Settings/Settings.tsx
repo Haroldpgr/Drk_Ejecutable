@@ -1,16 +1,21 @@
 import { useState, useEffect } from "react";
-import { Settings as SettingsIcon, Monitor, HardDrive, Globe, ShieldCheck } from "lucide-react";
+import { Settings as SettingsIcon, Monitor, HardDrive, Globe, ShieldCheck, Info, RefreshCw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion, getName } from "@tauri-apps/api/app";
 import "./Settings.css";
 
 interface SettingsProps {
   showToast?: (message: string, type: "success" | "error" | "info" | "warning") => void;
+  launcherVersion?: string;
+  onCheckUpdates?: () => void;
 }
 
-export default function Settings({ showToast }: SettingsProps) {
+export default function Settings({ showToast, launcherVersion, onCheckUpdates }: SettingsProps) {
   const [notifications, setNotifications] = useState(true);
   const [ram, setRam] = useState(4096);
   const [systemRam, setSystemRam] = useState(8192);
+  const [appVersion, setAppVersion] = useState("");
+  const [appName, setAppName] = useState("");
 
   useEffect(() => {
     // Cargar ajustes guardados
@@ -21,6 +26,11 @@ export default function Settings({ showToast }: SettingsProps) {
     setRam(savedRam);
 
     invoke<number>("get_system_ram").then(setSystemRam).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion(""));
+    getName().then(setAppName).catch(() => setAppName(""));
   }, []);
 
   const handleSave = () => {
@@ -62,6 +72,40 @@ export default function Settings({ showToast }: SettingsProps) {
               <input type="checkbox" checked={notifications} onChange={(e) => setNotifications(e.target.checked)} />
               <span className="slider round"></span>
             </label>
+          </div>
+        </div>
+
+        <div className="settings-page-card glass-card">
+          <h3 className="settings-page-card-title">
+            <Info size={18} />
+            Acerca de
+          </h3>
+          <div className="settings-page-field vertical">
+            <div className="field-info">
+              <span className="field-label">Versión</span>
+              <span className="field-description">
+                {appName ? `${appName} ` : ""}{launcherVersion || (appVersion ? `v${appVersion}` : "—")}
+              </span>
+            </div>
+            <div className="settings-about-actions">
+              <button
+                className="drk-button-secondary settings-check-updates-btn"
+                onClick={() => {
+                  if (onCheckUpdates) {
+                    onCheckUpdates();
+                  } else if (showToast) {
+                    showToast("No hay sistema de updates configurado", "warning");
+                  }
+                }}
+              >
+                <RefreshCw size={18} />
+                Buscar updates
+              </button>
+            </div>
+            <div className="settings-team">
+              <span className="settings-team-pill">DRK Team</span>
+              <span className="settings-team-pill">Haroldpgr</span>
+            </div>
           </div>
         </div>
 

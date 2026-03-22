@@ -338,7 +338,7 @@ export default function Profile({ showToast, onUpdateUser }: ProfileProps) {
         type="file" 
         ref={fileInputRef} 
         style={{ display: 'none' }} 
-        accept="image/*"
+        accept="image/png"
         onChange={handleFileChange}
       />
 

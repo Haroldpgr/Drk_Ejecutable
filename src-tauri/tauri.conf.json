@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' http://localhost:1420; img-src 'self' https: data: http://localhost:1420; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:1420; connect-src 'self' http://localhost:1420 ws://localhost:1420 https://uemqmgymyjcfugpomfps.supabase.co https://*.supabase.co https://mc-heads.net https://api.dicebear.com; font-src 'self' data:; media-src 'self' blob:;"
     }
   },
   "bundle": {

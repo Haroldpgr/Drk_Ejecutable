@@ -11,9 +11,259 @@ use super::models::*;
 use super::downloader::download_file;
 use super::utils::{get_os_name, get_arch, extract_natives, replace_vars, check_rules};
 use super::java::{get_java_path_for_major, get_required_java_version, download_java, get_system_java_version};
+use base64::Engine;
 
  
 const RESOURCES_URL: &str = "https://resources.download.minecraft.net";
+
+fn ensure_offline_skins_mod(
+    minecraft_dir: &Path,
+    mc_version: &str,
+    loader: &str,
+    username: &str,
+    avatar_url: Option<&str>,
+    app: &Option<AppHandle>,
+    instance_id: &str
+) -> Result<(), String> {
+    if loader != "fabric" && loader != "forge" {
+        return Ok(());
+    }
+
+    let mods_dir = minecraft_dir.join("mods");
+    let _ = fs::create_dir_all(&mods_dir);
+
+    let has_csl = fs::read_dir(&mods_dir)
+        .ok()
+        .and_then(|it| {
+            for e in it.flatten() {
+                let name = e.file_name().to_string_lossy().to_lowercase();
+                if name.contains("customskinloader") && name.ends_with(".jar") {
+                    return Some(());
+                }
+            }
+            None
+        })
+        .is_some();
+    if !has_csl {
+        emit(app, instance_id, "skins", 78, "Instalando mod de skins (offline)...");
+        let project_id = "idMHQ4n2";
+        let api_url = format!(
+            "https://api.modrinth.com/v2/project/{}/version?game_versions=[\"{}\"]&loaders=[\"{}\"]",
+            project_id, mc_version, loader
+        );
+
+        let resp = reqwest::blocking::Client::builder()
+            .user_agent("DrkLauncher/1.0")
+            .build()
+            .map_err(|e| e.to_string())?
+            .get(&api_url)
+            .send()
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err("No se pudo obtener versión del mod de skins".to_string());
+        }
+        let versions: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+        let arr = versions.as_array().ok_or("Respuesta inválida del servidor de skins")?;
+        let first = arr.first().ok_or("No hay versiones del mod de skins para esta versión")?;
+
+        if let Some(deps) = first.get("dependencies").and_then(|v| v.as_array()) {
+            for d in deps {
+                let dep_type = d.get("dependency_type").and_then(|v| v.as_str()).unwrap_or("");
+                if dep_type != "required" {
+                    continue;
+                }
+                if let Some(version_id) = d.get("version_id").and_then(|v| v.as_str()) {
+                    let url = format!("https://api.modrinth.com/v2/version/{}", version_id);
+                    let r = reqwest::blocking::Client::builder()
+                        .user_agent("DrkLauncher/1.0")
+                        .build()
+                        .map_err(|e| e.to_string())?
+                        .get(&url)
+                        .send()
+                        .map_err(|e| e.to_string())?;
+                    if !r.status().is_success() {
+                        continue;
+                    }
+                    let v = r.json::<serde_json::Value>().map_err(|e| e.to_string())?;
+                    if let Some(files) = v.get("files").and_then(|x| x.as_array()) {
+                        if let Some(f) = files.first() {
+                            if let (Some(u), Some(fn_)) = (f.get("url").and_then(|x| x.as_str()), f.get("filename").and_then(|x| x.as_str())) {
+                                let dep_target = mods_dir.join(fn_);
+                                if !dep_target.exists() {
+                                    let _ = download_file(u, &dep_target, None);
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(project_id) = d.get("project_id").and_then(|v| v.as_str()) {
+                    let dep_api_url = format!(
+                        "https://api.modrinth.com/v2/project/{}/version?game_versions=[\"{}\"]&loaders=[\"{}\"]",
+                        project_id, mc_version, loader
+                    );
+                    let r = reqwest::blocking::Client::builder()
+                        .user_agent("DrkLauncher/1.0")
+                        .build()
+                        .map_err(|e| e.to_string())?
+                        .get(&dep_api_url)
+                        .send()
+                        .map_err(|e| e.to_string())?;
+                    if !r.status().is_success() {
+                        continue;
+                    }
+                    let versions = r.json::<serde_json::Value>().map_err(|e| e.to_string())?;
+                    let arr = match versions.as_array() {
+                        Some(a) => a,
+                        None => continue,
+                    };
+                    let first = match arr.first() {
+                        Some(f) => f,
+                        None => continue,
+                    };
+                    let files = match first.get("files").and_then(|v| v.as_array()) {
+                        Some(f) => f,
+                        None => continue,
+                    };
+                    let file = match files.first() {
+                        Some(f) => f,
+                        None => continue,
+                    };
+                    if let (Some(u), Some(fn_)) = (file.get("url").and_then(|x| x.as_str()), file.get("filename").and_then(|x| x.as_str())) {
+                        let dep_target = mods_dir.join(fn_);
+                        if !dep_target.exists() {
+                            let _ = download_file(u, &dep_target, None);
+                        }
+                    }
+                }
+            }
+        }
+
+        let files = first.get("files").and_then(|v| v.as_array()).ok_or("Versión sin archivos")?;
+        let mut chosen = None;
+        for f in files {
+            if f.get("primary").and_then(|p| p.as_bool()).unwrap_or(false) {
+                chosen = Some(f);
+                break;
+            }
+        }
+        let f = chosen.unwrap_or_else(|| files.first().unwrap());
+        let url = f.get("url").and_then(|v| v.as_str()).ok_or("Archivo sin url")?;
+        let filename = f.get("filename").and_then(|v| v.as_str()).ok_or("Archivo sin nombre")?;
+        let target = mods_dir.join(filename);
+        if !target.exists() {
+            download_file(url, &target, None)?;
+        }
+    }
+
+    let local_skin_dir = minecraft_dir.join("CustomSkinLoader").join("LocalSkin").join("skins");
+    let _ = fs::create_dir_all(&local_skin_dir);
+    let skin_path = local_skin_dir.join(format!("{}.png", username));
+    let csl_dir = minecraft_dir.join("CustomSkinLoader");
+    let csl_config_path = csl_dir.join("CustomSkinLoader.json");
+    let csl_cache_dir = csl_dir.join("caches");
+
+    let _ = fs::create_dir_all(&csl_dir);
+    if !csl_config_path.exists() {
+        let json = serde_json::json!({
+            "version": "14.27",
+            "buildNumber": 37,
+            "loadlist": [
+                {
+                    "name": "LocalSkin",
+                    "type": "Legacy",
+                    "checkPNG": false,
+                    "skin": "LocalSkin/skins/{USERNAME}.png",
+                    "model": "auto",
+                    "cape": "LocalSkin/capes/{USERNAME}.png",
+                    "elytra": "LocalSkin/elytras/{USERNAME}.png"
+                },
+                { "name": "GameProfile", "type": "GameProfile" },
+                {
+                    "name": "Mojang",
+                    "type": "MojangAPI",
+                    "apiRoot": "https://api.mojang.com/",
+                    "sessionRoot": "https://sessionserver.mojang.com/"
+                },
+                { "name": "LittleSkin", "type": "CustomSkinAPI", "root": "https://littleskin.cn/csl/" },
+                { "name": "BlessingSkin", "type": "CustomSkinAPI", "root": "https://skin.prinzeugen.net/" },
+                { "name": "ElyBy", "type": "ElyByAPI", "root": "http://skinsystem.ely.by/textures/" },
+                { "name": "SkinMe", "type": "UniSkinAPI", "root": "http://www.skinme.cc/uniskin/" },
+                { "name": "TLauncher", "type": "ElyByAPI", "root": "https://auth.tlauncher.org/skin/profile/texture/login/" },
+                { "name": "GlitchlessGames", "type": "GlitchlessAPI", "root": "https://games.glitchless.ru/api/minecraft/users/profiles/textures/?nickname=" },
+                { "name": "MinecraftCapes", "type": "MinecraftCapesAPI", "root": "https://api.minecraftcapes.net/profile/" },
+                { "name": "OptiFine", "type": "Legacy", "checkPNG": false, "model": "auto", "cape": "https://optifine.net/capes/{USERNAME}.png" }
+            ],
+            "forceLoadAllTextures": true,
+            "enableTransparentSkin": true,
+            "enableDynamicSkull": true,
+            "forceDisableCache": true
+        });
+        let _ = fs::write(&csl_config_path, serde_json::to_string_pretty(&json).unwrap_or_default());
+    }
+
+    if csl_config_path.exists() {
+        if let Ok(content) = fs::read_to_string(&csl_config_path) {
+            if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(loadlist) = json.get_mut("loadlist").and_then(|v| v.as_array_mut()) {
+                    let mut idx_local: Option<usize> = None;
+                    for (i, entry) in loadlist.iter().enumerate() {
+                        if entry.get("name").and_then(|n| n.as_str()) == Some("LocalSkin") {
+                            idx_local = Some(i);
+                            break;
+                        }
+                    }
+                    if let Some(i) = idx_local {
+                        let local = loadlist.remove(i);
+                        loadlist.insert(0, local);
+                        json["forceDisableCache"] = serde_json::Value::Bool(true);
+                        let _ = fs::write(&csl_config_path, serde_json::to_string_pretty(&json).unwrap_or_default());
+                    }
+                }
+            }
+        }
+    }
+
+    if csl_cache_dir.exists() {
+        let _ = fs::remove_dir_all(&csl_cache_dir);
+    }
+
+    let src = avatar_url.unwrap_or("").trim();
+    if !src.is_empty() {
+        emit(app, instance_id, "skins", 79, "Aplicando skin del perfil...");
+        if src.starts_with("data:image/") && src.contains(";base64,") {
+            if !src.starts_with("data:image/png;base64,") {
+                return Err("La skin debe ser PNG".to_string());
+            }
+            let b64 = src.splitn(2, ";base64,").nth(1).unwrap_or("");
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(b64.as_bytes())
+                .map_err(|_| "Skin inválida (base64)".to_string())?;
+            if bytes.len() > 2_000_000 {
+                return Err("Skin demasiado grande".to_string());
+            }
+            fs::write(&skin_path, bytes).map_err(|e| e.to_string())?;
+            if csl_cache_dir.exists() {
+                let _ = fs::remove_dir_all(&csl_cache_dir);
+            }
+            return Ok(());
+        }
+        if src.starts_with("http://") || src.starts_with("https://") {
+            download_file(src, &skin_path, None)?;
+            if csl_cache_dir.exists() {
+                let _ = fs::remove_dir_all(&csl_cache_dir);
+            }
+            return Ok(());
+        }
+    }
+
+    if !skin_path.exists() {
+        emit(app, instance_id, "skins", 79, "Descargando skin...");
+        let skin_url = format!("https://mc-heads.net/skin/{}", username);
+        download_file(&skin_url, &skin_path, None)?;
+    }
+    Ok(())
+}
 
 pub fn fetch_manifest_with_fallback() -> Result<VersionManifest, String> {
     let client = reqwest::blocking::Client::builder()
@@ -249,18 +499,32 @@ pub fn prepare_and_launch(
     };
     emit(&app, instance_id, "version", 20, "Versión resuelta");
     if loader.as_deref().map(|l| l == "vanilla").unwrap_or(true) {
-        let info = super::vanilla_loader::download_vanilla(base_path, &minecraft_dir, version_id, &app, instance_id)?;
-        let cmd = super::vanilla_loader::build_vanilla_command(base_path, &minecraft_dir, &info, auth, ram_mb, width, height)?;
-        return Ok(cmd);
+        if auth.access_token == "offline" {
+            emit(&app, instance_id, "skins", 18, "Vanilla no soporta skins offline; usando Fabric para skins");
+            let info = super::fabric_loader::download_fabric(base_path, &minecraft_dir, version_id, &app, instance_id)?;
+            let _ = ensure_offline_skins_mod(&minecraft_dir, version_id, "fabric", &auth.name, auth.avatar_url.as_deref(), &app, instance_id);
+            let cmd = super::fabric_loader::build_fabric_command(base_path, &minecraft_dir, &info, auth, ram_mb, width, height)?;
+            return Ok(cmd);
+        } else {
+            let info = super::vanilla_loader::download_vanilla(base_path, &minecraft_dir, version_id, &app, instance_id)?;
+            let cmd = super::vanilla_loader::build_vanilla_command(base_path, &minecraft_dir, &info, auth, ram_mb, width, height)?;
+            return Ok(cmd);
+        }
     }
     if matches!(loader.as_deref(), Some("fabric")) {
         let info = super::fabric_loader::download_fabric(base_path, &minecraft_dir, version_id, &app, instance_id)?;
         let cmd = super::fabric_loader::build_fabric_command(base_path, &minecraft_dir, &info, auth, ram_mb, width, height)?;
+        if auth.access_token == "offline" {
+            let _ = ensure_offline_skins_mod(&minecraft_dir, version_id, "fabric", &auth.name, auth.avatar_url.as_deref(), &app, instance_id);
+        }
         return Ok(cmd);
     }
     if matches!(loader.as_deref(), Some("forge")) {
         let info = super::forge_loader::download_forge(base_path, &minecraft_dir, version_id, &app, instance_id)?;
         let cmd = super::forge_loader::build_forge_command(base_path, &minecraft_dir, &info, auth, ram_mb, width, height)?;
+        if auth.access_token == "offline" {
+            let _ = ensure_offline_skins_mod(&minecraft_dir, version_id, "forge", &auth.name, auth.avatar_url.as_deref(), &app, instance_id);
+        }
         return Ok(cmd);
     }
 
@@ -460,11 +724,20 @@ pub fn prepare_and_launch(
         }
     }
 
+    let _ = fs::create_dir_all(&mods_dir);
     if let Some(urls) = &mods_urls {
         emit(&app, instance_id, "mods", 80, "Iniciando descarga de mods...");
         download_mods_parallel(urls, &mods_dir, &app, instance_id)?;
     }
     emit(&app, instance_id, "mods", 90, "Mods listos");
+
+    if auth.access_token == "offline" {
+        if let Some(l) = loader.as_deref() {
+            if let Err(e) = ensure_offline_skins_mod(&minecraft_dir, version_id, l, &auth.name, auth.avatar_url.as_deref(), &app, instance_id) {
+                emit(&app, instance_id, "skins", 79, &format!("Skins offline: {}", e));
+            }
+        }
+    }
 
     // 7. Build Arguments
     let required_java = version_info

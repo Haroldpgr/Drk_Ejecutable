@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Save, Folder, FileText, Cpu, Maximize, Trash2, Settings as SettingsIcon } from "lucide-react";
+import { X, Save, Folder, FileText, Cpu, Maximize, Trash2, Settings as SettingsIcon, Package, RefreshCw, ToggleLeft, ToggleRight } from "lucide-react";
 import "./InstanceSettings.css";
 
 interface Instance {
@@ -18,16 +18,21 @@ interface Instance {
   modpackUrl?: string;
 }
 
+interface ModEntry {
+  file_name: string;
+  enabled: boolean;
+}
+
 interface InstanceSettingsProps {
   instance: Instance;
   isAdmin: boolean;
   onClose: () => void;
   onSave: (updatedInstance: Instance) => void;
-  onOpenFolder: (path: string) => void;
+  onOpenInstanceFolder: (instanceId: string, kind: "root" | "logs" | "mods" | "minecraft") => void;
   onDelete: (instanceId: string) => void;
 }
 
-export default function InstanceSettings({ instance, isAdmin, onClose, onSave, onOpenFolder, onDelete }: InstanceSettingsProps) {
+export default function InstanceSettings({ instance, isAdmin, onClose, onSave, onOpenInstanceFolder, onDelete }: InstanceSettingsProps) {
   const [name, setName] = useState(instance.name);
   const [version, setVersion] = useState(instance.version);
   const [ram, setRam] = useState(instance.ram || 4096);
@@ -37,6 +42,8 @@ export default function InstanceSettings({ instance, isAdmin, onClose, onSave, o
   const [serverName, setServerName] = useState(instance.serverName || "");
   const [modpackUrl, setModpackUrl] = useState(instance.modpackUrl || "");
   const [systemRam, setSystemRam] = useState(8192);
+  const [mods, setMods] = useState<ModEntry[]>([]);
+  const [modsLoading, setModsLoading] = useState(false);
 
   useEffect(() => {
     // Get system RAM for the slider
@@ -44,6 +51,31 @@ export default function InstanceSettings({ instance, isAdmin, onClose, onSave, o
       invoke<number>("get_system_ram").then(setSystemRam).catch(console.error);
     });
   }, []);
+
+  async function refreshMods() {
+    setModsLoading(true);
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const list = await invoke<ModEntry[]>("get_instance_mods", { instanceId: instance.id });
+      setMods(list || []);
+    } catch {
+      setMods([]);
+    } finally {
+      setModsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshMods();
+  }, [instance.id]);
+
+  async function toggleMod(mod: ModEntry) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("set_instance_mod_enabled", { instanceId: instance.id, fileName: mod.file_name, enabled: !mod.enabled });
+      refreshMods();
+    } catch {}
+  }
 
   const handleSave = () => {
     onSave({
@@ -206,13 +238,17 @@ export default function InstanceSettings({ instance, isAdmin, onClose, onSave, o
               Archivos
             </h3>
             <div className="settings-actions-grid">
-              <button className="settings-action-btn glass-card" onClick={() => onOpenFolder(instance.path)}>
+              <button className="settings-action-btn glass-card" onClick={() => onOpenInstanceFolder(instance.id, "root")}>
                 <Folder size={20} />
                 <span>Ver Carpeta</span>
               </button>
-              <button className="settings-action-btn glass-card" onClick={() => onOpenFolder(`${instance.path}/logs`)}>
+              <button className="settings-action-btn glass-card" onClick={() => onOpenInstanceFolder(instance.id, "logs")}>
                 <FileText size={20} />
                 <span>Ver Logs</span>
+              </button>
+              <button className="settings-action-btn glass-card" onClick={() => onOpenInstanceFolder(instance.id, "mods")}>
+                <Package size={20} />
+                <span>Ver Mods</span>
               </button>
               {isAdmin && (
                 <button className="settings-action-btn danger glass-card" onClick={() => onDelete(instance.id)}>
@@ -220,6 +256,36 @@ export default function InstanceSettings({ instance, isAdmin, onClose, onSave, o
                   <span>Eliminar Instancia</span>
                 </button>
               )}
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <h3 className="settings-section-title">
+              <Package size={18} />
+              Mods
+            </h3>
+            <div className="settings-card glass-card">
+              <div className="settings-mods-header">
+                <div className="settings-mods-meta">{mods.length} mods</div>
+                <button className="settings-mods-refresh" onClick={refreshMods} disabled={modsLoading}>
+                  <RefreshCw size={16} />
+                  {modsLoading ? "Cargando..." : "Actualizar"}
+                </button>
+              </div>
+              <div className="settings-mods-list">
+                {mods.length === 0 ? (
+                  <div className="settings-mods-empty">No hay mods instalados.</div>
+                ) : (
+                  mods.map((m) => (
+                    <button key={m.file_name} className={`settings-mod-row ${m.enabled ? "enabled" : "disabled"}`} onClick={() => toggleMod(m)}>
+                      <span className="settings-mod-name">{m.file_name}</span>
+                      <span className="settings-mod-state">
+                        {m.enabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>
